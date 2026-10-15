@@ -6,3 +6,11 @@
 .message-banner button,.message-preview button,.message-preview footer a{border:0;border-radius:20px;padding:8px 12px;background:#2563eb;color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none}
 .message-preview{width:720px;max-width:calc(100vw - 24px);max-height:90dvh;overflow:auto;margin:auto}.message-preview::backdrop{background:#0f172a99}.message-preview-content{max-height:55dvh;min-height:80px;overflow:auto;margin:16px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .message-preview-content iframe{border:0;width:100%;height:48dvh;background:white}.message-preview-content p{margin:8px 0}.message-preview-status{font-size:13px}.message-preview-reply{margin-top:12px}.message-preview-reply[hidden]{display:none}.message-preview-reply textarea{display:block;width:100%;border:1px solid #64748b;border-radius:10px;padding:10px;margin:8px 0;background:inherit;color:inherit}.message-preview button:disabled{opacity:.5;cursor:wait}.message-category{font-size:22px}
+
+.message-banner{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+.message-identity{position:relative;display:block;flex:0 0 48px;width:48px;height:48px}
+.message-avatar{position:relative;display:flex;width:44px;height:44px;align-items:center;justify-content:center;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:14px;font-weight:700;overflow:hidden}
+.message-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.message-identity .message-category{position:absolute;right:0;bottom:0;display:flex;align-items:center;justify-content:center;width:23px;height:23px;border:2px solid var(--color-surface,#fff);border-radius:50%;background:#2563eb;color:#fff;font-size:12px;line-height:1}
+.message-banner-content{flex:1;min-width:0}.message-banner-content strong{display:block;font-size:14px;overflow-wrap:anywhere}.message-banner-content p{font-size:13px;line-height:1.4;margin:4px 0 0}
+.message-banner-trailing{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0}.message-banner-trailing time{font-size:10px;color:var(--color-muted,#64748b);white-space:nowrap}.message-banner-trailing button{padding:0 5px;color:inherit;background:transparent;font-size:18px}

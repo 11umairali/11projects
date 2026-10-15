@@ -24,6 +24,18 @@ class InboxExtrasController extends Controller
         if ($deny = $this->denyUnlessRole($request, 'view')) return $deny;
         $m = Message::whereHas('conversation', fn ($q) => $q->where('workspace_id', $this->wid($request)))->findOrFail($id);
 
+        if ($m->body_text === null && $m->body_html === null && $m->imap_uid) {
+            try {
+                if (!app(\App\Services\Email\EmailSyncService::class)->fetchBodyForMessage($m)) {
+                    throw new \RuntimeException('Message has no available mail transport.');
+                }
+                $m->refresh();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Mail body fetch failed', ['message_id' => $m->id, 'exception' => get_class($e)]);
+                return response()->json(['message' => 'Could not load this email from the mail server. Try again.'], 503);
+            }
+        }
+
         // Images first (the sanitiser would drop cid: sources): cid: and http(s) sources become signed https URLs on this server.
         $raw = $m->body_html ? EmailAssetController::rewrite((string) $m->body_html, $m) : null;
         $html = $raw ? \App\Helpers\HtmlSanitizer::sanitize($raw) : null;

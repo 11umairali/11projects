@@ -936,7 +936,9 @@ class InboxApiController extends Controller
         $workspaceId = auth()->user()->active_workspace_id;
         if (!$workspaceId) return response()->json(['error' => 'No workspace'], 400);
 
+        $skip = $request->validate(['skip_accounts' => 'sometimes|array|max:1000', 'skip_accounts.*' => 'integer|min:1']);
         $accounts = EmailAccount::where('workspace_id', $workspaceId)
+            ->whereNotIn('id', $skip['skip_accounts'] ?? [])
             ->whereIn('status', ['connected', 'error'])
             ->get();
 
@@ -947,6 +949,7 @@ class InboxApiController extends Controller
         $syncService = app(EmailSyncService::class);
         $totalSynced = 0;
         $failedAccounts = 0;
+        $failures = [];
         $hasMore = false;
 
         // 25 per call is a middle ground: low enough to stay under PHP's typical
@@ -968,7 +971,12 @@ class InboxApiController extends Controller
                 }
             } catch (\Throwable $e) {
                 $failedAccounts++;
-                Log::warning("InboxAPI: Batch sync failed: " . Str::limit($e->getMessage(), 100));
+                $failure = \App\Services\Email\MailSyncFailure::describe($e);
+                $failures[] = ['account_id' => $account->id, 'email' => $account->email, ...$failure];
+                Log::warning("InboxAPI: Batch sync failed: " . Str::limit($e->getMessage(), 100), [
+                    'account_id' => $account->id, 'provider' => $account->provider,
+                    'exception' => get_class($e), 'code' => $failure['code'],
+                ]);
             }
         }
 
@@ -981,7 +989,7 @@ class InboxApiController extends Controller
             }
         }
 
-        return response()->json(['synced' => $totalSynced, 'has_more' => $hasMore, 'failed_accounts' => $failedAccounts]);
+        return response()->json(['synced' => $totalSynced, 'has_more' => $hasMore, 'failed_accounts' => $failedAccounts, 'failures' => $failures]);
     }
 
     /**

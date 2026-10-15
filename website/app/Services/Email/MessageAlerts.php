@@ -43,7 +43,26 @@ class MessageAlerts
                 'email_sent' => 'Email accepted for sending', 'email_delivered' => 'Email delivered',
                 'email_failed' => 'Email could not be sent', 'email_bounced' => 'Email delivery failed', default => 'New email',
             };
-            $recipient->notify(new InAppNotification($title, Str::limit(implode(' · ', array_filter([trim((string) $message->subject), trim(strip_tags((string) ($message->body_text ?: $message->body_html)))])), 240), '/inbox?cid='.$conversation->id, 'mail', $type, $message->direction === 'inbound' ? (string) ($message->from_name ?: $message->from_email) : (string) config('app.name'), messageId: (int) $message->id));
+            $sender = $message->direction === 'inbound'
+                ? User::where('email', $message->from_email)->first()
+                : $recipient;
+            $contact = $conversation->contact_id ? $conversation->contact : null;
+            $senderName = $message->direction === 'inbound'
+                ? (string) ($sender?->name ?: $contact?->full_name ?: $message->from_name ?: $message->from_email)
+                : (string) $recipient->name;
+            $avatar = $sender?->avatar_path ?: $contact?->avatar_path;
+            $notification = new InAppNotification($title, Str::limit(implode(' · ', array_filter([trim((string) $message->subject), trim(strip_tags((string) ($message->body_text ?: $message->body_html)))])), 240), '/inbox?cid='.$conversation->id, 'mail', $type, $senderName, $avatar ? asset('storage/'.$avatar) : '', messageId: (int) $message->id, pushViaDatabaseEvent: false);
+            // A stored bell entry is not proof that Firebase was called. Email uses
+            // the same direct sender as chat, independent of event discovery/cache.
+            $notification->id = (string) Str::uuid();
+            $recipient->notify($notification);
+            $accepted = app(\App\Services\FcmPush::class)->sendToUser($recipient, $title, $notification->body, [
+                'notification_id' => $notification->id, 'message_id' => (string) $message->id,
+                'type' => $type, 'action_url' => $notification->actionUrl,
+                'sender_name' => $senderName, 'sender_avatar' => $notification->senderAvatar,
+                'created_at_iso' => now()->toIso8601String(),
+            ]);
+            if (!$accepted) Log::warning('Email push was not accepted', ['account_id' => $account->id, 'message_id' => $message->id]);
         } catch (\Throwable $e) {
             // Notification/provider failures cannot turn a successful SMTP send into a retry.
             Log::warning('Message alert unavailable', ['message_id' => $message->id, 'exception' => get_class($e)]);

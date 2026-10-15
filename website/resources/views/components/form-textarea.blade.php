@@ -25,7 +25,7 @@
         minlength: {{ $minlength ?? 'null' }},
         maxlength: {{ $maxlength ?? 'null' }},
         autoResize: {{ $autoResize ? 'true' : 'false' }},
-        serverError: {{ $error ? \"'\" . addslashes($error) . \"'\" : 'null' }},
+        serverError: @js($error),
     })"
     class="w-full"
 >

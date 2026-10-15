@@ -531,15 +531,21 @@
                                     <button type="button" @click="openNotification(n)"
                                             :class="n.read ? 'opacity-60' : 'bg-brand/5'"
                                             class="w-full text-left px-4 py-3 border-b border-border/30 hover:bg-surface transition-colors flex gap-3">
-                                        <span class="flex-shrink-0 w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/></svg>
+                                        <span class="message-identity">
+                                            <span class="message-avatar">
+                                                <span x-text="(n.sender_name || n.title || 'D').trim().split(/\s+/).slice(0,2).map(word => word[0]).join('').toUpperCase()"></span>
+                                                <img x-show="window.DahiNotification?.avatar(n)" :src="window.DahiNotification?.avatar(n) || null" alt="" referrerpolicy="no-referrer" x-on:error="$el.style.display = 'none'" x-on:load="$el.style.display = ''">
+                                            </span>
+                                            <span class="message-category" aria-hidden="true" x-html="window.DahiNotification?.categoryIcon(n) || ''"></span>
                                         </span>
                                         <div class="flex-1 min-w-0">
-                                            <p class="text-sm font-medium text-ink truncate" x-text="n.title"></p>
-                                            <p class="text-xs text-muted line-clamp-2" x-text="n.body"></p>
-                                            <p class="text-[10px] text-muted/70 mt-1" x-text="n.created_at"></p>
+                                            <p class="text-sm font-semibold text-ink" x-text="n.sender_name || n.title"></p>
+                                            <p class="text-xs text-muted line-clamp-2 mt-1" x-text="n.body"></p>
                                         </div>
-                                        <span x-show="!n.read" class="flex-shrink-0 w-2 h-2 bg-brand rounded-full mt-2"></span>
+                                        <div class="flex flex-col items-end gap-2 shrink-0">
+                                            <time class="text-[10px] text-muted whitespace-nowrap" x-text="window.DahiNotification?.relativeTime(n) || n.created_at"></time>
+                                            <span x-show="!n.read" class="w-1.5 h-1.5 bg-brand rounded-full" aria-label="Unread"></span>
+                                        </div>
                                     </button>
                                 </template>
                             </div>
@@ -600,8 +606,8 @@
 
         {{-- Toast container — MUST render before any <x-toast> dispatcher
              so its window listener is registered before flash toasts fire. --}}
-        <link rel="stylesheet" href="{{ asset('css/message-notifications.css') }}?v=20261015">
-        <script src="{{ asset('js/message-notifications.js') }}?v=20261015"></script>
+        <link rel="stylesheet" href="{{ asset('css/message-notifications.css') }}?v=20261015.1">
+        <script src="{{ asset('js/message-notifications.js') }}?v=20261015.1"></script>
         <x-toast-container />
 
         {{-- Page content --}}

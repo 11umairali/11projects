@@ -45,7 +45,7 @@ import WebRTC
     }
     UNUserNotificationCenter.current().delegate = self
     // Register before Dart starts, including launches caused by remote actions.
-    let view = UNNotificationAction(identifier: "notification_view", title: "View", options: [.foreground])
+    let view = UNNotificationAction(identifier: "notification_view", title: "View", options: [.authenticationRequired])
     let reply = UNTextInputNotificationAction(identifier: "notification_reply", title: "Reply", options: [.authenticationRequired], textInputButtonTitle: "Send", textInputPlaceholder: "Write a reply")
     UNUserNotificationCenter.current().setNotificationCategories([
       UNNotificationCategory(identifier: "MESSAGE_VIEW", actions: [view], intentIdentifiers: [], options: []),

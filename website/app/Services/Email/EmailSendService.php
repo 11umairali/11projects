@@ -24,6 +24,12 @@ class EmailSendService
             $replyMessage->refresh();
             if (in_array($replyMessage->delivery_status, ['sent', 'delivered', 'read', 'bounced'], true)) return true;
             if ($replyMessage->scheduled_at && $replyMessage->schedule_status !== 'pending') return false;
+            // Older reply paths do not assign an RFC Message-ID. Persist it
+            // before transport so the sent copy and retries use one identity.
+            if (!$replyMessage->message_id_header) {
+                $replyMessage->message_id_header = '<'.Str::uuid().'@'.(parse_url(config('app.url'), PHP_URL_HOST) ?: 'dahimail.local').'>';
+                $replyMessage->saveQuietly();
+            }
             // The same mailbox must not receive separate To/Cc/Bcc deliveries.
             $seen = [];
             foreach (['to_emails', 'cc_emails', 'bcc_emails'] as $field) {
@@ -129,6 +135,7 @@ class EmailSendService
                 fromEmail: $replyMessage->from_email ?? $account->email,
                 inReplyTo: $replyMessage->in_reply_to,
                 referencesHeader: $replyMessage->references_header ?? [],
+                messageId: $replyMessage->message_id_header,
             );
 
             $mailer = Mail::mailer($mailerName);
@@ -718,6 +725,7 @@ class EmailSendService
         foreach ($message->to_emails ?? [] as $address) $email->addTo($address);
         foreach ($message->cc_emails ?? [] as $address) $email->addCc($address);
         foreach ($message->bcc_emails ?? [] as $address) $email->addBcc($address);
+        if ($message->message_id_header) $email->getHeaders()->addIdHeader('Message-ID', trim($message->message_id_header, '<>'));
         if ($message->in_reply_to) $email->getHeaders()->addIdHeader('In-Reply-To', trim($message->in_reply_to, '<>'));
         if ($message->references_header) $email->getHeaders()->addIdHeader('References', array_map(fn ($id) => trim($id, '<>'), $message->references_header));
         foreach ($this->getAttachmentPaths($message) as $attachment) {

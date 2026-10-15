@@ -19,6 +19,9 @@ import 'push_receipt.dart';
 Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   final t = message.data['type'];
+  if (t != 'call' && t != 'call_cancel' && (message.data['dm_native_shown'] == '1' || message.notification != null)) {
+    await NotifyService.I.rememberRemote(message.data, messageId: message.messageId);
+  }
   await PushReceipt.received();
   if (Platform.isAndroid && t == 'call' && message.data['dm_native_shown'] != '1') {
     // a call that is already too old (phone was off / no network) must not ring: it would only be a "ghost" call
@@ -81,6 +84,9 @@ class PushService with WidgetsBindingObserver {
     FirebaseMessaging.onMessage.listen((m) async {
       await PushReceipt.received();
       if (_api == null) return;
+      if (m.data['type'] != 'call' && m.data['type'] != 'call_cancel' && m.data['dm_native_shown'] == '1') {
+        await NotifyService.I.rememberRemote(m.data, messageId: m.messageId);
+      }
       AppRefresh.bump();
       final type = m.data['type'];
       if (type == 'call') {

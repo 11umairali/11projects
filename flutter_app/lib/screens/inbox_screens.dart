@@ -204,10 +204,12 @@ class _ConversationsPageState extends State<ConversationsPage> with WidgetsBindi
 
   Future<void> _syncAndReload({bool force = false}) async {
     try {
-      final importing = MailSync.sync(context.read<Session>(), afterCurrent: force);
-      // Mail already saved by a push/worker must appear even if IMAP is slow.
-      await _key.currentState?.reload();
-      await importing;
+      // Observe both futures immediately: sync may fail before a slow list GET
+      // completes. Mail already saved by a worker still appears during IMAP sync.
+      await Future.wait<void>([
+        MailSync.sync(context.read<Session>(), afterCurrent: force),
+        _key.currentState?.reload() ?? Future<void>.value(),
+      ]);
       // Sync may update an existing row or hydrate its body without inserting a new one.
       if (mounted) await _key.currentState?.reload();
     } catch (error) {

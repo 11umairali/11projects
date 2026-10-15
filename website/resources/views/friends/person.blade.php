@@ -18,10 +18,14 @@
             </div>
         </div>
 
-        @php($canTalk = !empty($p['can_talk']))
+        @php
+            $canTalk = !empty($p['can_talk']);
+        @endphp
         <div class="grid grid-cols-5 gap-1 sm:gap-3" aria-label="{{ __('Contact actions') }}">
             @foreach([['chat', __('Chat')], ['phone', __('Call')], ['video', __('Video')], ['mail', __('Email')], ['calendar', __('Meeting')]] as [$icon, $label])
-                @php($enabled = $canTalk && ($icon === 'chat' ? \App\Support\FriendSettings::chatEnabled() : ($icon === 'mail' ? !empty($p['email']) : \App\Support\FriendSettings::callsEnabled())))
+                @php
+                    $enabled = $canTalk && ($icon === 'chat' ? \App\Support\FriendSettings::chatEnabled() : ($icon === 'mail' ? !empty($p['email']) : \App\Support\FriendSettings::callsEnabled()));
+                @endphp
                 @if(!$enabled)
                     <button disabled class="flex flex-col items-center gap-2 rounded-2xl border border-border py-3 px-1 min-w-0 opacity-40" aria-label="{{ $label }}"><x-action-icon :name="$icon" /><span class="text-xs">{{ $label }}</span></button>
                 @elseif(in_array($icon, ['phone', 'video']))

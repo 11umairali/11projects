@@ -1,5 +1,6 @@
 package com.dahify.dahimail
 
+import android.widget.RemoteViews
 import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -21,6 +22,7 @@ import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.app.RemoteInput
 import androidx.core.app.Person
 import androidx.core.graphics.drawable.IconCompat
 import com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver
@@ -31,7 +33,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Calendar
 import java.io.ByteArrayOutputStream
-import android.widget.RemoteViews
 import java.util.concurrent.Executors
 
 /** Native posting runs before Flutter. FCM's service owns data-message delivery. */
@@ -207,19 +208,6 @@ open class NativePushReceiver : FlutterFirebaseMessagingReceiver() {
             return PendingIntent.getBroadcast(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
 
-        private fun messageAction(context: Context, id: Int, payload: String, actionId: String, mutable: Boolean): PendingIntent {
-            val intent = Intent(context, ActionBroadcastReceiver::class.java).apply {
-                action = ActionBroadcastReceiver.ACTION_TAPPED
-                data = Uri.parse("dahimail://notification/$id/$actionId")
-                putExtra("notificationId", id)
-                putExtra("payload", payload)
-                putExtra("actionId", actionId)
-                putExtra("cancelNotification", false)
-            }
-            return PendingIntent.getBroadcast(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or
-                (if (mutable && Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE))
-        }
-
         private fun launch(context: Context, id: Int, payload: String, action: String? = null): PendingIntent {
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -231,6 +219,23 @@ open class NativePushReceiver : FlutterFirebaseMessagingReceiver() {
                 putExtra("cancelNotification", true)
             }
             return PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        }
+
+        // System actions keep View and RemoteInput Reply inside the notification.
+        // Only Reply is mutable, so Android can attach the user's typed input.
+        private fun messageAction(context: Context, id: Int, payload: String, actionId: String, input: Boolean = false): PendingIntent {
+            val intent = Intent(context, ActionBroadcastReceiver::class.java).apply {
+                action = ActionBroadcastReceiver.ACTION_TAPPED
+                data = Uri.parse("dahimail://notification/$id/$actionId")
+                putExtra("notificationId", id)
+                putExtra("payload", payload)
+                putExtra("actionId", actionId)
+                putExtra("cancelNotification", false)
+            }
+            val mutable = if (input) {
+                if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+            } else PendingIntent.FLAG_IMMUTABLE
+            return PendingIntent.getBroadcast(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or mutable)
         }
 
         private fun channel(context: Context, calls: Boolean, alertId: String = ALERT_CHANNEL, vibrate: Boolean = true, playSound: Boolean = true) {
@@ -363,7 +368,7 @@ open class NativePushReceiver : FlutterFirebaseMessagingReceiver() {
             return true
         }
 
-        internal fun showAlert(context: Context, data: Map<String, String>): Boolean {
+        @Synchronized internal fun showAlert(context: Context, data: Map<String, String>): Boolean {
             if (data["title"].isNullOrBlank()) return false
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val type = data["type"].orEmpty()
@@ -384,16 +389,17 @@ open class NativePushReceiver : FlutterFirebaseMessagingReceiver() {
             if (!canPost(context, channelId)) return true
             val key = data["notification_id"].takeUnless { it.isNullOrBlank() }
                 ?: data["message_id"].takeUnless { it.isNullOrBlank() } ?: data["google.message_id"] ?: return false
+            val receipts = context.getSharedPreferences("native_push", Context.MODE_PRIVATE)
+            val receiptKey = "alert_delivered_$key"
+            val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+            if (receipts.getLong(receiptKey, 0) > cutoff) return true
             val id = key.hashCode() and 0x7fffffff
-            val payload = JSONObject(data).toString()
+            // Polling and older pushes may contain only a local conversation URL
+            // or chat sender ID. Match Dart's target rules before exposing Reply.
+            val replyTarget = notificationReplyTarget(data)
+            val actionData = data + replyTarget
+            val payload = JSONObject(actionData).toString()
             val view = launch(context, id, payload)
-            val label = when (type) {
-                "email_received", "new_email" -> "New email"
-                "friend_request" -> "Friend request"
-                "friend_accepted" -> "Friend request accepted"
-                "friend_suggestion" -> "Friend suggestion"
-                else -> data["category_label"].orEmpty().ifBlank { notificationLabel(data) }
-            }
             val body = when (type) {
                 "friend_request" -> "Sent you a friend request"
                 "friend_accepted" -> "Accepted your friend request"
@@ -401,59 +407,83 @@ open class NativePushReceiver : FlutterFirebaseMessagingReceiver() {
             }
             val sender = data["sender_name"].orEmpty().ifBlank { data["title"].orEmpty() }
             val builder = NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(R.drawable.ic_stat_notify).setSubText(label)
+                .setSmallIcon(R.drawable.ic_stat_notify)
                 .setContentTitle(sender).setContentText(body)
                 .setPriority(NotificationCompat.PRIORITY_HIGH).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .setAutoCancel(true).setContentIntent(view).setOnlyAlertOnce(true)
                 .setDefaults(NotificationCompat.DEFAULT_LIGHTS or (if (vibrate) NotificationCompat.DEFAULT_VIBRATE else 0) or
                     (if (sound == "default") NotificationCompat.DEFAULT_SOUND else 0))
-                .setCategory(if (data["reply_kind"] != null) NotificationCompat.CATEGORY_MESSAGE else NotificationCompat.CATEGORY_EVENT)
-            builder.addAction(0, "View", launch(context, id, JSONObject(data + ("notification_action" to "view")).toString(), "notification_view"))
-            val replyable = type in listOf("chat", "email_received", "new_email", "contact_reply", "message", "new_conversation") &&
-                data["reply_kind"] in listOf("friend", "conversation") && (data["reply_id"]?.toIntOrNull() ?: 0) > 0
-            if (replyable) builder.addAction(NotificationCompat.Action.Builder(0, "Reply", messageAction(context, id, payload, "notification_reply", true))
-                .addRemoteInput(androidx.core.app.RemoteInput.Builder("FlutterLocalNotificationsPluginInputResult").setLabel("Reply").build())
-                .setAllowGeneratedReplies(true).build())
-            val postedAt = notificationTime(data)
-            val compactView = messageView(context, label, sender, body, false, data, postedAt)
-            val expandedView = messageView(context, label, sender, body, true, data, postedAt)
-            val headsUpView = messageView(context, label, sender, body, true, data, postedAt).apply {
-                setInt(R.id.notification_body, "setMaxLines", 2)
+                .setCategory(if (replyTarget.isNotEmpty()) NotificationCompat.CATEGORY_MESSAGE else NotificationCompat.CATEGORY_EVENT)
+            builder.addAction(NotificationCompat.Action.Builder(0, context.getString(R.string.notification_view),
+                messageAction(context, id, payload, "notification_view"))
+                .setShowsUserInterface(false).build())
+            if (replyTarget.isNotEmpty()) {
+                builder.addAction(NotificationCompat.Action.Builder(0, context.getString(R.string.notification_reply),
+                    messageAction(context, id, payload, "notification_reply", true))
+                    .addRemoteInput(RemoteInput.Builder("FlutterLocalNotificationsPluginInputResult")
+                        .setLabel(context.getString(R.string.notification_reply)).build())
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                    .setAllowGeneratedReplies(true).setShowsUserInterface(false).build())
             }
+            val postedAt = notificationTime(data)
+            fun card(avatar: Bitmap, compact: Boolean): RemoteViews = RemoteViews(context.packageName,
+                if (compact) R.layout.notification_message_compact else R.layout.notification_message).apply {
+                setTextViewText(R.id.notification_sender, sender)
+                setTextViewText(R.id.notification_body, body)
+                setTextViewText(R.id.notification_time, relativeTime(postedAt))
+                setImageViewResource(R.id.notification_type_icon, notificationIcon(data))
+                setImageViewBitmap(R.id.notification_avatar, avatar)
+            }
+            fun applyCard(avatar: Bitmap) {
+                builder.setCustomContentView(card(avatar, true))
+                    .setCustomBigContentView(card(avatar, false))
+                    .setCustomHeadsUpContentView(card(avatar, false))
+            }
+            // The system owns the action row/RemoteInput. Our content contains
+            // only the brand/category, sender, message, relative time and avatar.
             builder.setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                .setCustomContentView(compactView)
-                .setCustomBigContentView(expandedView)
-                .setCustomHeadsUpContentView(headsUpView)
                 .setWhen(postedAt).setShowWhen(false)
+            applyCard(avatarPlaceholder(sender))
             val manager = context.getSystemService(NotificationManager::class.java)
             wakeDisplay(context, "notification")
             manager.notify(id, builder.build())
+            receipts.edit().apply {
+                receipts.all.filter { it.key.startsWith("alert_delivered_") }
+                    .entries.sortedByDescending { (it.value as? Long) ?: 0 }.drop(99)
+                    .forEach { remove(it.key) }
+                putLong(receiptKey, System.currentTimeMillis())
+            }.apply()
             recordResult(context, "posted_alert")
             // Avatar is optional. Never delay the alert or resurrect a dismissed one.
             val avatar = data["sender_avatar"].orEmpty()
             if (avatar.startsWith("https://")) images.execute {
                 val bitmap = fetchAvatar(avatar) ?: return@execute
                 if (manager.activeNotifications.any { it.id == id && it.notification.`when` == postedAt && it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString() == body }) {
-                    val circle = circularAvatar(bitmap)
-                    compactView.setImageViewBitmap(R.id.notification_avatar, circle)
-                    expandedView.setImageViewBitmap(R.id.notification_avatar, circle)
-                    headsUpView.setImageViewBitmap(R.id.notification_avatar, circle)
+                    applyCard(circularAvatar(bitmap))
                     manager.notify(id, builder.build())
                 }
             }
             return true
         }
 
-        private fun messageView(context: Context, label: String, sender: String, body: String, expanded: Boolean, data: Map<String, String>, postedAt: Long): RemoteViews =
-            RemoteViews(context.packageName, if (expanded) R.layout.notification_message else R.layout.notification_message_compact).apply {
-                setTextViewText(R.id.notification_time, relativeTime(postedAt))
-                setImageViewResource(R.id.notification_type_icon, notificationIcon(data))
-                setContentDescription(R.id.notification_type_icon, label)
-                setTextViewText(R.id.notification_sender, sender)
-                setTextViewText(R.id.notification_body, body)
-                setInt(R.id.notification_body, "setMaxLines", if (expanded) 8 else 1)
-                setImageViewBitmap(R.id.notification_avatar, avatarPlaceholder(sender))
+        internal fun notificationReplyTarget(data: Map<String, String>): Map<String, String> {
+            val type = data["type"]
+            if (type !in listOf("chat", "email_received", "new_email", "contact_reply", "message", "new_conversation")) return emptyMap()
+            val kind = data["reply_kind"]
+            val id = data["reply_id"]?.toIntOrNull()
+            if (id != null && id > 0 && (kind == "conversation" || (kind == "friend" && type == "chat")))
+                return mapOf("reply_kind" to kind!!, "reply_id" to id.toString())
+            if (type == "chat") {
+                val peer = data["from_id"]?.toIntOrNull()
+                if (peer != null && peer > 0) return mapOf("reply_kind" to "friend", "reply_id" to peer.toString())
             }
+            val url = Uri.parse(data["action_url"].orEmpty())
+            if (url.isHierarchical && url.path == "/inbox") {
+                val conversation = (url.getQueryParameter("cid") ?: url.getQueryParameter("conversation"))?.toIntOrNull()
+                if (conversation != null && conversation > 0) return mapOf("reply_kind" to "conversation", "reply_id" to conversation.toString())
+            }
+            return emptyMap()
+        }
 
         internal fun notificationTime(data: Map<String, String>, now: Long = System.currentTimeMillis()): Long {
             val raw = data["created_at_iso"] ?: data["created_at"] ?: data["sent_at"] ?: return now
@@ -483,18 +513,6 @@ open class NativePushReceiver : FlutterFirebaseMessagingReceiver() {
             shader.setLocalMatrix(Matrix().apply { setTranslate(-(source.width - size) / 2f, -(source.height - size) / 2f) })
             Canvas(bitmap).drawCircle(size / 2f, size / 2f, size / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.shader = shader })
             return bitmap
-        }
-
-        private fun notificationLabel(data: Map<String, String>): String {
-            val missed = data["type"].orEmpty().contains("missed")
-            return when (notificationIcon(data)) {
-                R.drawable.ic_notify_chat -> "Chat"
-                R.drawable.ic_notify_email -> "Email"
-                R.drawable.ic_notify_meeting -> "Meeting"
-                R.drawable.ic_notify_video -> if (missed) "Missed video call" else "Video call"
-                R.drawable.ic_notify_call -> if (missed) "Missed audio call" else "Audio call"
-                else -> "Update"
-            }
         }
 
         internal fun notificationIcon(data: Map<String, String>): Int {

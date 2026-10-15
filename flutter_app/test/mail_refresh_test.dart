@@ -170,4 +170,41 @@ void main() {
     session.dispose();
   });
 
+  testWidgets('fast sync failure is handled while manual refresh waits for a slow inbox GET', (tester) async {
+    final session = Session()..token = 'synthetic'..user = {'id': 1, 'active_workspace_id': 7};
+    Completer<http.Response>? list;
+    var failSync = false;
+    await http.runWithClient(() async {
+      await tester.pumpWidget(ChangeNotifierProvider.value(value: session, child: const MaterialApp(
+        home: Scaffold(body: ConversationsPage(channel: 'email')),
+      )));
+      await tester.pumpAndSettle();
+      list = Completer<http.Response>();
+      failSync = true;
+      final refresh = tester.widget<RefreshIndicator>(find.byType(RefreshIndicator)).onRefresh();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(list!.isCompleted, isFalse);
+      expect(tester.takeException(), isNull);
+      list!.complete(http.Response('{"data":[]}', 200));
+      await tester.pumpAndSettle();
+      await refresh;
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Could not sync one or more mail accounts'), findsOneWidget);
+      list = null;
+      failSync = false;
+      // The failed refresh must release the sync run so the next attempt works.
+      await tester.widget<RefreshIndicator>(find.byType(RefreshIndicator)).onRefresh();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }, () => MockClient((request) async {
+      if (request.url.path.endsWith('/inbox/sync')) {
+        return http.Response(failSync ? '{"failed_accounts":1,"has_more":false}' : '{"has_more":false}', 200);
+      }
+      if (request.url.path.endsWith('/inbox/conversations')) return list != null ? await list!.future : http.Response('{"data":[]}', 200);
+      return http.Response('{}', 200);
+    }));
+    session.dispose();
+  });
+
 }

@@ -6,7 +6,7 @@
     <FrameLayout android:layout_width="36dp" android:layout_height="36dp" android:layout_marginEnd="10dp">
         <ImageView android:id="@+id/notification_brand"
             android:layout_width="32dp" android:layout_height="32dp"
-            android:src="@mipmap/ic_launcher" android:scaleType="fitCenter" android:contentDescription="Dahimail" />
+            android:src="@mipmap/ic_dahimail_launcher" android:scaleType="fitCenter" android:contentDescription="Dahimail" />
         <ImageView android:id="@+id/notification_type_icon"
             android:layout_width="16dp" android:layout_height="16dp"
             android:layout_gravity="bottom|right" android:padding="3dp"
@@ -18,12 +18,12 @@
         <TextView android:id="@+id/notification_sender"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
-            android:textSize="14sp" android:textStyle="bold" android:includeFontPadding="false"
+            android:textSize="12sp" android:textStyle="bold" android:includeFontPadding="false"
             android:maxLines="1" android:ellipsize="end" />
         <TextView android:id="@+id/notification_body"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textAppearance="@android:style/TextAppearance.Material.Notification"
-            android:layout_marginTop="3dp" android:textSize="12sp" android:includeFontPadding="false"
+            android:textSize="11sp" android:includeFontPadding="false"
             android:maxLines="1" android:ellipsize="end" />
     </LinearLayout>
     <LinearLayout android:layout_width="56dp" android:layout_height="wrap_content"

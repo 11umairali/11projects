@@ -57,7 +57,7 @@ test('mail threading retains both parent and references and includes plain text'
 });
 
 test('sending the same message twice delivers once and deduplicates recipients', function () {
-    DB::statement('CREATE TABLE messages (id INTEGER PRIMARY KEY, workspace_id INTEGER, sent_at TEXT, scheduled_at TEXT, schedule_status TEXT, delivery_status TEXT, delivery_error TEXT, to_emails TEXT, cc_emails TEXT, bcc_emails TEXT, body_html TEXT, updated_at TEXT, deleted_at TEXT)');
+    DB::statement('CREATE TABLE messages (id INTEGER PRIMARY KEY, workspace_id INTEGER, sent_at TEXT, scheduled_at TEXT, schedule_status TEXT, delivery_status TEXT, delivery_error TEXT, message_id_header TEXT, to_emails TEXT, cc_emails TEXT, bcc_emails TEXT, body_html TEXT, updated_at TEXT, deleted_at TEXT)');
     // Older compose paths set sent_at before transport. It must not suppress the first delivery.
     DB::table('messages')->insert(['id' => 1, 'workspace_id' => 9, 'delivery_status' => 'pending', 'sent_at' => now(), 'to_emails' => '["one@example.test"]', 'cc_emails' => '["ONE@example.test", "two@example.test"]', 'bcc_emails' => '["two@example.test"]']);
     $service = new class extends EmailSendService {
@@ -65,6 +65,8 @@ test('sending the same message twice delivers once and deduplicates recipients',
         protected function shouldTrackOneToOne(): bool { return false; }
         protected function sendViaSMTP(Message $message, EmailAccount $account, string $html): bool {
             $this->deliveries++;
+            expect($message->message_id_header)->not->toBeEmpty();
+            expect($message->fresh()->message_id_header)->toBe($message->message_id_header);
             expect($message->cc_emails)->toBe(['two@example.test'])->and($message->bcc_emails)->toBe([]);
             return true;
         }
@@ -113,4 +115,21 @@ test('newly provisioned mailbox persists verification before the registration ev
     Notification::fake();
     event(new \Illuminate\Auth\Events\Registered($user));
     Notification::assertNothingSent();
+});
+
+
+test('SMTP uses the persisted mail identity so the sent copy is not imported twice', function () {
+    $mail = new DynamicEmail(['to@example.test'], [], [], 'A subject', '<p>Hello</p>', messageId: '<persisted@example.test>');
+    expect($mail->headers()->messageId)->toBe('persisted@example.test');
+});
+
+
+test('Gmail MIME preserves the stored Message-ID on provider submission', function () {
+    $service = new class extends EmailSendService {
+        protected function getSignature(EmailAccount $account, ?Message $message = null): ?string { return null; }
+        protected function getAttachmentPaths(Message $message): array { return []; }
+        public function raw(Message $message, EmailAccount $account): string { return $this->buildRawRfc2822($message, $account, '<p>Hello</p>'); }
+    };
+    $message = new Message(['subject' => 'Hello', 'to_emails' => ['to@example.test'], 'from_email' => 'from@example.test', 'message_id_header' => '<persisted@example.test>']);
+    expect($service->raw($message, new EmailAccount(['email' => 'from@example.test'])))->toContain('Message-ID: <persisted@example.test>');
 });

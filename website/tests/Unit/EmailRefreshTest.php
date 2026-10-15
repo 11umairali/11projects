@@ -49,3 +49,22 @@ test('foreground sync reports provider failure instead of a successful empty ref
     $result = (new InboxApiController)->syncNow(Request::create('/', 'POST'))->getData(true);
     expect($result['failed_accounts'])->toBe(1)->and($result['synced'])->toBe(0);
 });
+
+test('sync reports a safe actionable account failure and can continue healthy accounts separately', function () {
+    DB::statement('CREATE TABLE email_accounts (id INTEGER PRIMARY KEY, workspace_id INTEGER, email TEXT, provider TEXT, status TEXT, deleted_at TEXT)');
+    DB::table('email_accounts')->insert([
+        ['id' => 1, 'workspace_id' => 7, 'email' => 'broken@example.test', 'provider' => 'imap', 'status' => 'connected'],
+        ['id' => 2, 'workspace_id' => 7, 'email' => 'healthy@example.test', 'provider' => 'imap', 'status' => 'connected'],
+    ]);
+    $this->mock(EmailSyncService::class, function ($mock) {
+        $mock->shouldReceive('syncBatch')->once()->withArgs(fn ($a) => $a->id === 1)->andThrow(new Webklex\PHPIMAP\Exceptions\AuthFailedException('Secret provider response password=do-not-expose'));
+        $mock->shouldReceive('syncBatch')->twice()->withArgs(fn ($a) => $a->id === 2)->andReturn([0, false]);
+    });
+    $controller = new InboxApiController;
+    $first = $controller->syncNow(Request::create('/', 'POST'))->getData(true);
+    expect($first['failures'])->toBe([['account_id' => 1, 'email' => 'broken@example.test', 'code' => 'authentication_failed',
+        'message' => 'Mail server sign-in failed. Reconnect this account in Connected accounts.']]);
+    expect(json_encode($first))->not->toContain('do-not-expose');
+    $next = $controller->syncNow(Request::create('/', 'POST', ['skip_accounts' => [1]]))->getData(true);
+    expect($next['failed_accounts'])->toBe(0);
+});

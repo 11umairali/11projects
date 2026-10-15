@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:dahimail/core/notify.dart';
+import 'package:dahimail/core/prefs.dart';
+import 'package:flutter/widgets.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -95,6 +99,75 @@ void main() {
     expect(args['body'], 'The email preview');
     expect(args['platformSpecifics']['subtitle'], isNull);
     expect(args['platformSpecifics']['categoryIdentifier'], 'MESSAGE_VIEW');
+  });
+
+  test('system View callback stays in the notification without scheduling app navigation', () async {
+    await NotifyService.I.init();
+    FlutterSecureStorage.setMockInitialValues({});
+    NotifyService.I.pendingNotification = null;
+    final payload = {'type': 'email_received', 'reply_kind': 'conversation',
+      'reply_id': '7', 'recipient_user_id': '1', 'message_id': '42'};
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(MethodCall('didReceiveNotificationResponse', {
+        'notificationResponseType': 1, 'id': 123, 'actionId': 'notification_view', 'payload': jsonEncode(payload),
+      })),
+      (_) {},
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(NotifyService.I.pendingNotification, isNull);
+    expect(shown, isEmpty);
+  });
+
+  test('simultaneous Firebase deliveries show the same email only once', () async {
+    final data = {'type': 'email_received', 'title': 'New email', 'notification_id': 'email-concurrent'};
+    await Future.wait([
+      NotifyService.I.showRemote(data, foreground: true),
+      NotifyService.I.showRemote(data, foreground: true),
+    ]);
+    expect(shown, hasLength(1));
+  });
+
+  test('Firebase delivery after REST polling does not repeat an email alert', () async {
+    SharedPreferences.setMockInitialValues({'n_shown': ['email-polled']});
+    await NotifyService.I.showRemote({'type': 'email_received', 'title': 'New email', 'notification_id': 'email-polled'}, foreground: true);
+    expect(shown, isEmpty);
+  });
+
+  test('an email displayed natively while backgrounded does not show again on resume', () async {
+    SharedPreferences.setMockInitialValues({'n_baseline': true});
+    final prefs = AppPrefs();
+    await prefs.load();
+    NotifyService.I.state = AppLifecycleState.resumed;
+    NotifyService.I.bannerHostReady = true;
+    NotifyService.I.dismissBanner();
+    await NotifyService.I.rememberRemote({'notification_id': 'native-email'});
+    await NotifyService.I.process({'notifications': [
+      {'id': 'native-email', 'type': 'email_received', 'title': 'Alice', 'body': 'New mail', 'read': false},
+    ]}, prefs);
+    expect(NotifyService.I.banner.value, isNull);
+    expect(shown, isEmpty);
+    NotifyService.I.bannerHostReady = false;
+    prefs.dispose();
+  });
+
+  test('registered push cannot suppress a background email poll before delivery', () async {
+    SharedPreferences.setMockInitialValues({'n_baseline': true});
+    final prefs = AppPrefs(); await prefs.load();
+    NotifyService.I.pushActive = true;
+    NotifyService.I.state = AppLifecycleState.paused;
+    try {
+      await NotifyService.I.process({'notifications': [
+        for (var i = 0; i < 4; i++)
+          {'id': 'missing-email-push-$i', 'type': 'email_received', 'title': 'New email', 'body': 'Hello', 'read': false}
+      ]}, prefs);
+      expect(shown, hasLength(4));
+      await NotifyService.I.process({'notifications': [
+        for (var i = 0; i < 4; i++)
+          {'id': 'missing-email-push-$i', 'type': 'email_received', 'title': 'New email', 'body': 'Hello', 'read': false}
+      ]}, prefs);
+      expect(shown, hasLength(4));
+    } finally { NotifyService.I.pushActive = false; NotifyService.I.state = AppLifecycleState.resumed; }
   });
 
 }

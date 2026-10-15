@@ -27,8 +27,8 @@
         required: {{ $required ? 'true' : 'false' }},
         minlength: {{ $minlength ?? 'null' }},
         maxlength: {{ $maxlength ?? 'null' }},
-        pattern: {{ $pattern ? \"'\" . addslashes($pattern) . \"'\" : 'null' }},
-        serverError: {{ $error ? \"'\" . addslashes($error) . \"'\" : 'null' }},
+        pattern: @js($pattern),
+        serverError: @js($error),
     })"
     class="w-full"
 >

@@ -41,6 +41,7 @@ class DynamicEmail extends Mailable
         public readonly string $fromEmail = '',
         public readonly ?string $inReplyTo = null,
         public readonly array $referencesHeader = [],
+        public readonly ?string $messageId = null,
     ) {}
 
     /**
@@ -106,6 +107,7 @@ class DynamicEmail extends Mailable
     public function headers(): Headers
     {
         return new Headers(
+            messageId: $this->messageId ? trim($this->messageId, '<>') : null,
             references: array_map(fn ($id) => trim($id, '<>'), $this->referencesHeader),
             text: $this->inReplyTo ? ['In-Reply-To' => $this->inReplyTo] : [],
         );

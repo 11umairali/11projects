@@ -57,14 +57,13 @@ class NotifyService with WidgetsBindingObserver {
     const android = AndroidInitializationSettings('ic_stat_notify');
     final ios = DarwinInitializationSettings(requestAlertPermission: false, requestBadgePermission: false, requestSoundPermission: false,
       notificationCategories: [
-        DarwinNotificationCategory('MESSAGE_VIEW', actions: [DarwinNotificationAction.plain('notification_view', 'View', options: {DarwinNotificationActionOption.foreground})]),
+        DarwinNotificationCategory('MESSAGE_VIEW', actions: [DarwinNotificationAction.plain('notification_view', 'View', options: {DarwinNotificationActionOption.authenticationRequired})]),
         DarwinNotificationCategory('CHAT_REPLY', actions: [
-          DarwinNotificationAction.plain('notification_view', 'View', options: {DarwinNotificationActionOption.foreground}),
+          DarwinNotificationAction.plain('notification_view', 'View', options: {DarwinNotificationActionOption.authenticationRequired}),
           DarwinNotificationAction.text('notification_reply', 'Reply', buttonTitle: 'Send', placeholder: 'Write a reply', options: {DarwinNotificationActionOption.authenticationRequired}),
-          DarwinNotificationAction.plain('notification_read', 'Mark as read', options: {DarwinNotificationActionOption.authenticationRequired}),
         ]),
         DarwinNotificationCategory('MESSAGE_REPLY', actions: [
-          DarwinNotificationAction.plain('notification_view', 'View', options: {DarwinNotificationActionOption.foreground}),
+          DarwinNotificationAction.plain('notification_view', 'View', options: {DarwinNotificationActionOption.authenticationRequired}),
           DarwinNotificationAction.text('notification_reply', 'Reply', buttonTitle: 'Send', placeholder: 'Write a reply', options: {DarwinNotificationActionOption.authenticationRequired}),
         ]),
       ]);
@@ -101,7 +100,7 @@ class NotifyService with WidgetsBindingObserver {
 
   void _onResponse(NotificationResponse r) {
     final a = r.actionId ?? '';
-    if (a == 'notification_reply' || a == 'notification_read') { notificationBackgroundResponse(r); return; }
+    if (a == 'notification_view' || a == 'notification_reply' || a == 'notification_read') { notificationBackgroundResponse(r); return; }
     if ((r.payload ?? '').startsWith('{')) {
       try { openRemote({...Map<String, dynamic>.from(jsonDecode(r.payload!)), if (a == 'notification_view') 'notification_action': 'view'}); return; } catch (_) {}
     }
@@ -210,7 +209,7 @@ class NotifyService with WidgetsBindingObserver {
         largeIcon: avatar,
         icon: NotificationStyle.of(notification ?? {}).smallIcon,
         actions: notification == null ? null : [
-          const AndroidNotificationAction('notification_view', 'View', showsUserInterface: true),
+          const AndroidNotificationAction('notification_view', 'View', cancelNotification: false),
           if (NotificationTarget.from(notification) != null)
             const AndroidNotificationAction('notification_reply', 'Reply', cancelNotification: false,
               inputs: [AndroidNotificationActionInput(label: 'Reply')]),
@@ -262,14 +261,41 @@ class NotifyService with WidgetsBindingObserver {
 
   /// Foreground FCM and data-only alerts use the same visible tray notification.
   /// Background messages with a notification payload are already displayed by the OS.
-  Future<void> showRemote(Map<String, dynamic> data, {String? messageId, bool foreground = false}) async {
+  // FCM and REST polling can complete together. Serialize the seen check and
+  // presentation so one notification produces one banner/sound.
+  Future<void> _presentationQueue = Future<void>.value();
+  Future<void> _present(Future<void> Function() action) {
+    final next = _presentationQueue.catchError((Object _) {}).then((_) => action());
+    _presentationQueue = next;
+    return next;
+  }
+
+  /// Native/OS banners already displayed while Dart was asleep must not be
+  /// announced again when the foreground notification poll resumes.
+  Future<void> rememberRemote(Map<String, dynamic> data, {String? messageId}) => _present(() async {
+    final key = '${data['notification_id'] ?? messageId ?? ''}';
+    if (key.isEmpty) return;
+    final storage = SharedPreferencesAsync();
+    final seen = await storage.getStringList('push_shown_ids') ?? [];
+    if (!seen.contains(key)) {
+      await storage.setStringList('push_shown_ids', [...seen.skip(seen.length > 99 ? seen.length - 99 : 0), key]);
+    }
+  });
+
+  Future<void> showRemote(Map<String, dynamic> data, {String? messageId, bool foreground = false}) =>
+      _present(() => _showRemote(data, messageId: messageId, foreground: foreground));
+
+  Future<void> _showRemote(Map<String, dynamic> data, {String? messageId, bool foreground = false}) async {
     final title = '${data['title'] ?? ''}';
     if (title.isEmpty || data['type'] == 'call' || data['type'] == 'call_cancel') return;
     final prefs = AppPrefs();
     await prefs.load();
     final category = categoryOf(data);
     if (!prefs.notifEnabled || prefs.inQuietHours || !_catOn(category, prefs)) return;
-    final key = '${data['notification_id'] ?? messageId ?? data['message_id'] ?? DateTime.now().microsecondsSinceEpoch}';
+    final notificationId = '${data['notification_id'] ?? ''}'.trim();
+    final key = notificationId.isNotEmpty ? notificationId :
+        messageId ?? '${data['type']}:${data['message_id'] ?? DateTime.now().microsecondsSinceEpoch}';
+    if (notificationId.isNotEmpty && prefs.shownIds.contains(notificationId)) return;
     final storage = SharedPreferencesAsync();
     final seen = await storage.getStringList('push_shown_ids') ?? [];
     if (seen.contains(key)) return;
@@ -292,10 +318,12 @@ class NotifyService with WidgetsBindingObserver {
   Future<void> test(AppPrefs prefs) => show(id: 1, title: '${AppConfig.appName} notifications are working', body: 'This is how new messages and alerts will look on this phone.', category: 'messages', prefs: prefs);
 
   /// Called after every poll with the server response of `GET notifications`.
-  Future<void> process(dynamic json, AppPrefs prefs) async {
+  Future<void> process(dynamic json, AppPrefs prefs) => _present(() => _process(json, prefs));
+
+  Future<void> _process(dynamic json, AppPrefs prefs) async {
     if (!prefs.notifEnabled) return;
     final unread = [for (final n in Api.list(json)) if (n['read'] != true) n];
-    final shown = prefs.shownIds.toSet();
+    final shown = {...prefs.shownIds, ...?await SharedPreferencesAsync().getStringList('push_shown_ids')};
 
     // First run on this device: remember what already exists, notify only about what comes next.
     if (!prefs.baselineDone) {
@@ -305,13 +333,16 @@ class NotifyService with WidgetsBindingObserver {
     }
     final fresh = [for (final n in unread) if (!shown.contains('${n['id']}')) n];
     if (fresh.isEmpty) return;
-    await prefs.rememberShown([for (final n in fresh) '${n['id']}']);
+    // Registration is not a delivery receipt. Let polling post a missing alert;
+    // native receipt IDs deduplicate a push that already reached Android.
+    // APNs owns iOS background banners; do not double-post them from polling.
+    if (pushActive && defaultTargetPlatform != TargetPlatform.android && state != AppLifecycleState.resumed) return;
 
-    if (pushActive && state != AppLifecycleState.resumed) return; // the server push already shows it
     if (state == AppLifecycleState.resumed) {
       if (!prefs.inQuietHours) {
         for (final n in fresh.where((n) => _catOn(categoryOf(n), prefs)).take(3)) { showBanner(n); }
       }
+      await prefs.rememberShown([for (final n in fresh) if (_catOn(categoryOf(n), prefs) && !prefs.inQuietHours) '${n['id']}']);
       // In-app banners share the sender layout with the notification center.
       if (prefs.inAppSound && !prefs.inQuietHours && fresh.any((n) => _catOn(categoryOf(n), prefs))) SoundPlayer.play(prefs.soundId);
       return;
@@ -321,12 +352,14 @@ class NotifyService with WidgetsBindingObserver {
 
     final wanted = [for (final n in fresh) if (_catOn(categoryOf(n), prefs)) n];
     if (wanted.isEmpty) return;
-    if (wanted.length > 3) {
+    if (wanted.length > 3 && !pushActive) {
       await show(id: 2, title: AppConfig.appName, body: '${wanted.length} new notifications', category: 'messages', prefs: prefs);
+      await prefs.rememberShown([for (final n in wanted) '${n['id']}']);
       return;
     }
     for (final n in wanted) {
       await show(id: '${n['id']}'.hashCode & 0x7fffffff, title: '${n['title'] ?? AppConfig.appName}', body: '${n['body'] ?? ''}', category: categoryOf(n), prefs: prefs, notification: n);
+      await prefs.rememberShown(['${n['id']}']);
     }
   }
 

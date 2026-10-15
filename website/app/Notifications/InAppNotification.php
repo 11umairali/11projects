@@ -26,6 +26,7 @@ class InAppNotification extends Notification
         public readonly string $senderName = '',
         public readonly string $senderAvatar = '',
         public readonly ?int $messageId = null,
+        public readonly bool $pushViaDatabaseEvent = true,
     ) {}
 
     public function via(object $notifiable): array

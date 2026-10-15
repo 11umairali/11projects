@@ -19,7 +19,7 @@
     x-data="formSelect({
         name: '{{ $name }}',
         required: {{ $required ? 'true' : 'false' }},
-        serverError: {{ $error ? \"'\" . addslashes($error) . \"'\" : 'null' }},
+        serverError: @js($error),
     })"
     class="w-full"
 >

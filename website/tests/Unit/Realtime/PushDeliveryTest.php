@@ -502,3 +502,33 @@ test('new iOS chat category adds read action without breaking older clients', fu
         Http::assertSent(fn ($request) => ($request['message']['token'] ?? '') === 'synthetic-'.$version && $request['message']['apns']['payload']['aps']['category'] === $category);
     }
 });
+
+test('persisted inbound email pushes once through the chat transport even without the notification event hook', function (bool $missingHook) {
+    config(['activitylog.enabled' => false]);
+    if ($missingHook) Illuminate\Support\Facades\Event::forget(Illuminate\Notifications\Events\NotificationSent::class);
+    Illuminate\Support\Facades\Event::fake([App\Events\StateChanged::class]);
+    DB::unprepared(file_get_contents(base_path('tests/Fixtures/realtime.sqlite.sql')));
+    DB::statement('CREATE TABLE notifications (id TEXT PRIMARY KEY, type TEXT, notifiable_type TEXT, notifiable_id INTEGER, data TEXT, read_at TEXT, created_at TEXT, updated_at TEXT)');
+    DB::statement('CREATE TABLE email_accounts (id INTEGER PRIMARY KEY, workspace_id INTEGER, user_id INTEGER, last_synced_at TEXT, deleted_at TEXT)');
+    DB::statement('CREATE TABLE conversations (id INTEGER PRIMARY KEY, workspace_id INTEGER, email_account_id INTEGER, contact_id INTEGER, channel TEXT, deleted_at TEXT)');
+    DB::statement('CREATE TABLE messages (id INTEGER PRIMARY KEY, uuid TEXT, workspace_id INTEGER, conversation_id INTEGER, direction TEXT, type TEXT, from_email TEXT, from_name TEXT, subject TEXT, body_text TEXT, sent_at TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT)');
+    DB::table('users')->insert(['id' => 1, 'uuid' => 'recipient', 'name' => 'Recipient', 'email' => 'recipient@example.test', 'notification_preferences' => '{}']);
+    DB::table('email_accounts')->insert(['id' => 1, 'workspace_id' => 7, 'user_id' => 1, 'last_synced_at' => now()->subHour()]);
+    DB::table('conversations')->insert(['id' => 4, 'workspace_id' => 7, 'email_account_id' => 1, 'channel' => 'email']);
+    DB::statement('ALTER TABLE device_tokens ADD COLUMN app_version TEXT');
+    DB::table('device_tokens')->update(['app_version' => '1.0.22+11']);
+    Http::fake(['fcm.googleapis.com/*' => Http::response(['name' => 'accepted'], 200)]);
+    $message = App\Models\Message::create(['workspace_id' => 7, 'conversation_id' => 4, 'direction' => 'inbound', 'type' => 'message',
+        'from_email' => 'alice@example.test', 'from_name' => 'Alice Example', 'subject' => 'New email', 'sent_at' => now()]);
+    expect(DB::table('notifications')->count())->toBe(1);
+    $notificationId = DB::table('notifications')->value('id');
+    Http::assertSentCount(2); // exactly once per registered device
+    Http::assertSent(fn ($r) => $r['message']['data']['notification_id'] === $notificationId
+        && $r['message']['data']['message_id'] === (string) $message->id
+        && $r['message']['data']['sender_name'] === 'Alice Example'
+        && $r['message']['data']['reply_kind'] === 'conversation'
+        && $r['message']['data']['reply_id'] === '4'
+        && $r['message']['android']['priority'] === 'HIGH' && !isset($r['message']['notification']));
+    $message->update(['body_text' => 'Later body hydration']);
+    Http::assertSentCount(2);
+})->with([false, true]);

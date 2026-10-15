@@ -33,8 +33,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       child: Scaffold(
         backgroundColor: Brand.splashColor,
         body: Stack(children: [
-          // 288 dp picture, exactly like the native splash symbol
-          Center(child: Image.asset('assets/brand/splash_symbol.png', width: 288, height: 288, filterQuality: FilterQuality.high)),
+          // Matches the reduced native launch artwork.
+          Center(child: Image.asset('assets/brand/splash_symbol.png', width: 192, height: 192, filterQuality: FilterQuality.high)),
           Align(
             alignment: const Alignment(0, 0.86),
             child: FadeTransition(

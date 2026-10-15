@@ -14,8 +14,8 @@ use Illuminate\Support\Facades\Notification;
 beforeEach(function () {
     config(['database.default' => 'sqlite', 'database.connections.sqlite.database' => ':memory:', 'activitylog.enabled' => false, 'broadcasting.default' => 'log']);
     DB::purge('sqlite');
-    DB::statement('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, notification_preferences TEXT)');
-    DB::statement('CREATE TABLE conversations (id INTEGER PRIMARY KEY, workspace_id INTEGER, email_account_id INTEGER, channel TEXT, deleted_at TEXT)');
+    DB::statement('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, avatar_path TEXT, notification_preferences TEXT)');
+    DB::statement('CREATE TABLE conversations (id INTEGER PRIMARY KEY, workspace_id INTEGER, email_account_id INTEGER, channel TEXT, messages_count INTEGER DEFAULT 0, preview TEXT, last_message_at TEXT, is_read INTEGER, created_at TEXT, updated_at TEXT, deleted_at TEXT)');
     DB::statement('CREATE TABLE email_accounts (id INTEGER PRIMARY KEY, workspace_id INTEGER, user_id INTEGER, last_synced_at TEXT, deleted_at TEXT)');
     DB::statement('CREATE TABLE messages (id INTEGER PRIMARY KEY, uuid TEXT, workspace_id INTEGER, conversation_id INTEGER, sender_id INTEGER, direction TEXT, type TEXT, delivery_status TEXT, subject TEXT, from_email TEXT, body_text TEXT, sent_at TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT)');
     DB::table('users')->insert(['id' => 1, 'name' => 'Synthetic owner']);
@@ -160,4 +160,29 @@ test('muting email suppresses alerts but preserves realtime list updates', funct
     DB::table('email_notification_mutes')->delete();
     Message::create($this->mail);
     Notification::assertSentTo(User::find(1), InAppNotification::class);
+});
+
+
+test('email alerts use the registered senders full name and profile picture', function () {
+    DB::table('users')->insert(['id' => 2, 'name' => 'Alice Example', 'email' => 'sender@example.test', 'avatar_path' => 'avatars/alice.png']);
+    Message::create($this->mail);
+    Notification::assertSentTo(User::find(1), InAppNotification::class, fn ($n) =>
+        $n->senderName === 'Alice Example' && $n->senderAvatar === asset('storage/avatars/alice.png'));
+});
+
+
+test('imported email invalidation observes the committed conversation preview and count', function () {
+    $this->mock(\App\Services\Email\MessageAlerts::class, function ($mock) {
+        $mock->shouldReceive('changed')->once()->withArgs(function ($message, $created) {
+            $conversation = DB::table('conversations')->where('id', $message->conversation_id)->first();
+            expect($created)->toBeTrue();
+            expect($conversation->preview)->toBe('Fresh email preview');
+            expect($conversation->messages_count)->toBe(1);
+            return true;
+        });
+    });
+    $service = new class extends \App\Services\Email\EmailSyncService {
+        public function import($conversation, $attributes) { return $this->storeImportedMessage($conversation, $attributes, 'Fresh email preview'); }
+    };
+    $service->import(\App\Models\Conversation::find(3), $this->mail);
 });

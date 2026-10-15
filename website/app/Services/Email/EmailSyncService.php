@@ -34,6 +34,14 @@ class EmailSyncService
      */
     public function syncAccount(EmailAccount $account): int
     {
+        // Gmail already holds this lock around each resumable page.
+        if ($account->provider === 'gmail') return $this->syncAccountLocked($account);
+        return Cache::lock("email-import:{$account->id}", 180)
+            ->get(fn () => $this->syncAccountLocked($account->refresh())) ?: 0;
+    }
+
+    protected function syncAccountLocked(EmailAccount $account): int
+    {
         if ($account->status === 'disconnected') {
             Log::warning("EmailSync: Account {$account->id} is disconnected, skipping.");
             return 0;
@@ -85,12 +93,20 @@ class EmailSyncService
     {
         if ($account->status === 'disconnected') return [0, false];
 
-        return match ($account->provider) {
-            'gmail' => $this->syncGmailBatch($account, $limit),
-            'imap', 'custom' => $this->syncImapBatch($account, $limit),
-            'outlook' => $this->syncOutlookBatch($account, $limit),
-            default => [0, false],
-        };
+        if ($account->provider === 'gmail') return $this->syncGmailBatch($account, $limit);
+
+        // HTTP refreshes and scheduled workers must share the same cursor lock.
+        // A busy import is pending work, so the client retries rather than
+        // reporting a successful empty refresh while the worker is still saving.
+        return Cache::lock("email-import:{$account->id}", 180)->get(function () use ($account, $limit) {
+            $account->refresh();
+            if ($account->status === 'disconnected') return [0, false];
+            return match ($account->provider) {
+                'imap', 'custom' => $this->syncImapBatch($account, $limit),
+                'outlook' => $this->syncOutlookBatch($account, $limit),
+                default => [0, false],
+            };
+        }) ?: [0, true];
     }
 
     /**
@@ -112,7 +128,7 @@ class EmailSyncService
     protected function syncGmailBatch(EmailAccount $account, int $limit): array
     {
         return Cache::lock("email-import:{$account->id}", 180)
-            ->get(fn () => $this->syncGmailBatchLocked($account, $limit)) ?: [0, false];
+            ->get(fn () => $this->syncGmailBatchLocked($account, $limit)) ?: [0, true];
     }
 
     protected function syncGmailBatchLocked(EmailAccount $account, int $limit): array
@@ -262,7 +278,9 @@ class EmailSyncService
         $started = now();
         $count = $this->syncImapMailbox($account, true);
         $account->update(['last_synced_at' => $started, 'status' => 'connected', 'error_message' => null]);
-        return [$count, false];
+        $folders = $this->normalizeSyncFolders($account->sync_folders ?? ['INBOX']);
+        $hasMore = collect($folders)->contains(fn ($state) => !($state['backfill_done'] ?? false) || ($state['headers_pending'] ?? false));
+        return [$count, $hasMore];
     }
 
     /**
@@ -270,18 +288,20 @@ class EmailSyncService
      */
     protected function syncOutlookBatch(EmailAccount $account, int $limit): array
     {
+        $started = now();
         $count = $this->syncOutlook($account);
+        $account->update(['last_synced_at' => $started, 'status' => 'connected', 'error_message' => null]);
         return [$count, false];
     }
 
     /**
-     * Sync via IMAP using PHP's native ext-imap.
+     * Sync via the pure-PHP IMAP transport shared with webmail.
      *
      * Continuously loops through ALL messages in batches of 200 until done.
      * Phase 1: Fast header-only sync — conversations appear in inbox immediately.
      * Phase 2: Body fetch — fills in message content using the already-open connection.
      *
-     * Time-limited to 8 minutes to stay within queue job timeout.
+     * Bounded foreground header import and background body hydration.
      */
     protected function syncImap(EmailAccount $account): int
     {
@@ -290,174 +310,125 @@ class EmailSyncService
 
     protected function syncImapMailbox(EmailAccount $account, bool $foreground = false): int
     {
-        // Strip spaces from App Passwords (Gmail generates them with spaces for readability)
-        $password = str_replace(' ', '', $account->imap_password ?? '');
-
-        $host = $account->imap_host;
-        $port = $account->imap_port ?? 993;
-        $encryption = $account->imap_encryption ?? 'ssl';
-
-        $flags = '/imap';
-        if ($encryption === 'ssl') {
-            $flags .= '/ssl/novalidate-cert';
-        } elseif ($encryption === 'tls') {
-            $flags .= '/tls/novalidate-cert';
-        }
-
-        $syncFoldersRaw = $account->sync_folders ?? ['INBOX'];
-        $syncFolders = $this->normalizeSyncFolders($syncFoldersRaw);
-        $newCount = 0;
-        $startTime = microtime(true);
-        // Keep total runtime under the worker's max-time=45 window with
-        // headroom so the worker never interrupts mid-save.
-        $maxHeaderSeconds = $foreground ? 8 : 20; // Keep HTTP refresh below the client timeout.
-        $maxTotalSeconds = 35;  // Phase 2: bodies use remaining time
-
-        foreach ($syncFolders as $folderName => $folderMeta) {
-            $mailbox = "{{$host}:{$port}{$flags}}{$folderName}";
-
-            Log::info("EmailSync: Connecting to {$mailbox} for {$account->email}");
-
-            @imap_timeout(IMAP_OPENTIMEOUT, $foreground ? 5 : 15);
-            @imap_timeout(IMAP_READTIMEOUT, $foreground ? 8 : 30);
-            @imap_timeout(IMAP_WRITETIMEOUT, 10);
-
-            $mbox = @imap_open($mailbox, $account->imap_username, $password, 0, 1);
-
-            if (! $mbox) {
-                $err = imap_last_error();
-                Log::error("EmailSync: IMAP open failed for {$account->email}/{$folderName}: {$err}");
-                throw new \RuntimeException("IMAP connection failed: {$err}");
-            }
-
-            Log::info("EmailSync: Connected to {$account->email}/{$folderName}");
-
-            try {
-                $uidValidity = (int) (@imap_status($mbox, $mailbox, SA_UIDVALIDITY)->uidvalidity ?? 0);
-                $folderLastUid = $folderMeta['last_uid'] ?? null;
-                $oldestUid = $folderMeta['oldest_uid'] ?? null;
-                $backfillDone = $folderMeta['backfill_done'] ?? false;
-                $batchSize = 50;
-                $lastUid = $folderLastUid;
-
-                $totalMsgs = @imap_num_msg($mbox);
-                if (! $totalMsgs || $totalMsgs === 0) {
-                    Log::info("EmailSync: Folder {$folderName} is empty");
+        $mailbox = SyncImapMailbox::connect($account, $foreground ? 5 : 15);
+        $folders = $this->normalizeSyncFolders($account->sync_folders ?? ['INBOX']);
+        $deadline = microtime(true) + ($foreground ? 8 : 20);
+        $count = 0;
+        try {
+            foreach (array_keys($folders) as $requested) {
+                $path = $mailbox->resolveFolder($requested);
+                if ($path === null) {
+                    // Provisioned accounts used to assume a folder literally named
+                    // Sent. Dovecot may expose INBOX.Sent, or no Sent folder yet.
+                    $folders[$requested] = ['missing_folder' => true, 'backfill_done' => true, 'headers_pending' => false];
+                    $account->update(['sync_folders' => $folders]);
                     continue;
                 }
-
-                Log::info("EmailSync: {$totalMsgs} messages in {$folderName}");
-
-                // ── Phase 1: Fetch ALL headers in batches of 200, loop until done ──
-                // Start from newest and work backwards
-                $currentEnd = $totalMsgs;
-                $lowestUid = $oldestUid;
-
-                while ($currentEnd >= 1) {
-                    // Time guard — stop headers at 25s, leave time for body fetch
-                    if ((microtime(true) - $startTime) > $maxHeaderSeconds) {
-                        Log::info("EmailSync: Header time limit reached, moving to body fetch");
-                        break;
-                    }
-
-                    $currentStart = max(1, $currentEnd - $batchSize + 1);
-
-                    Log::info("EmailSync: Fetching headers seq {$currentStart}-{$currentEnd}");
-                    $allOverviews = @imap_fetch_overview($mbox, "{$currentStart}:{$currentEnd}", 0) ?: [];
-
-                    if (empty($allOverviews)) {
-                        break;
-                    }
-
-                    usort($allOverviews, fn ($a, $b) => $a->uid <=> $b->uid);
-
-                    foreach ($allOverviews as $ov) {
-                        try {
-                            $ov->uidvalidity = $uidValidity;
-                            if (empty($ov->from) || empty($ov->message_id)) {
-                                $rawHeader = @imap_fetchheader($mbox, $ov->uid, FT_UID);
-                                if ($rawHeader) {
-                                    $parsed = imap_rfc822_parse_headers($rawHeader);
-                                    $ov->from = $parsed->fromaddress ?? $ov->from ?? '';
-                                    $ov->message_id = $parsed->message_id ?? $ov->message_id ?? null;
-                                }
-                            }
-                            $result = $this->processImapOverview($ov, $account, $folderName);
-                            if ($result === true) {
-                                $newCount++;
-                            }
-
-                            if (! $lastUid || $ov->uid > $lastUid) {
-                                $lastUid = $ov->uid;
-                            }
-                            if (! $lowestUid || $ov->uid < $lowestUid) {
-                                $lowestUid = $ov->uid;
-                            }
-                        } catch (\Throwable $e) {
-                            Log::error("EmailSync: Failed to process UID {$ov->uid}: {$e->getMessage()}");
-                        }
-                    }
-
-                    // Checkpoint progress after each batch so next run doesn't redo work
-                    $syncFolders[$folderName]['last_uid'] = $lastUid;
-                    $syncFolders[$folderName]['oldest_uid'] = $lowestUid;
-                    if ($currentStart <= 1) {
-                        $syncFolders[$folderName]['backfill_done'] = true;
-                    }
-                    $account->update([
-                        'sync_folders' => $syncFolders,
-                    ]);
-
-                    // Move window backwards
-                    $currentEnd = $currentStart - 1;
+                if ($path !== $requested) {
+                    $folders[$path] = $folders[$requested];
+                    unset($folders[$requested]);
                 }
-
-                // ── Phase 2: Fetch bodies — guaranteed 20 seconds minimum ──
-                $bodyCount = 0;
-                while (!$foreground && (microtime(true) - $startTime) < $maxTotalSeconds) {
-                    // Check IMAP connection is still alive before each batch
-                    if (!@imap_ping($mbox)) {
-                        Log::warning("EmailSync: IMAP connection dropped during body fetch, reconnecting");
-                        @imap_close($mbox);
-                        $mbox = @imap_open($mailbox, $account->imap_username, $password, 0, 1);
-                        if (!$mbox) {
-                            Log::error("EmailSync: IMAP reconnect failed, stopping body fetch");
-                            break;
-                        }
-                    }
-
-                    $messagesNeedingBody = Message::where('workspace_id', $account->workspace_id)
-                        ->whereNull('body_html')
-                        ->whereNull('body_text')
-                        ->whereNotNull('imap_uid')
-                        ->where('imap_folder', $folderName)
-                        ->orderByDesc('id')
-                        ->limit(100)
-                        ->get();
-
-                    if ($messagesNeedingBody->isEmpty()) {
-                        break;
-                    }
-
-                    foreach ($messagesNeedingBody as $msg) {
-                        if ((microtime(true) - $startTime) > $maxTotalSeconds) break;
-                        try {
-                            if ($this->fetchMessageByUid($mbox, $msg, $msg->conversation)) {
-                                $bodyCount++;
-                            }
-                        } catch (\Throwable $e) {
-                            Log::warning("EmailSync: Body fetch failed msg={$msg->id}: " . Str::limit($e->getMessage(), 100));
-                        }
+                if ($folders[$path]['missing_folder'] ?? false) $folders[$path] = [];
+                $validity = $mailbox->select($path);
+                $count += $this->syncImapHeaders($mailbox, $account, $path, $folders, $validity, $deadline);
+                if (!$foreground) {
+                    $pending = Message::where('workspace_id', $account->workspace_id)
+                        ->whereNull('body_html')->whereNull('body_text')->whereNotNull('imap_uid')->where('imap_folder', $path)
+                        ->whereHas('conversation', fn ($q) => $q->where('email_account_id', $account->id))->orderByDesc('id')->limit(25)->get();
+                    foreach ($pending as $message) {
+                        if (microtime(true) >= $deadline) break;
+                        $this->fetchMessageByUid($mailbox, $message, $message->conversation);
                     }
                 }
+            }
+        } finally { $mailbox->close(); }
+        return $count;
+    }
 
-                Log::info("EmailSync: {$newCount} headers synced, {$bodyCount} bodies fetched for {$folderName}");
-            } finally {
-                @imap_close($mbox);
+    /** Publish after the list preview/count and message are committed together. */
+    protected function storeImportedMessage(Conversation $conversation, array $attributes, string $preview): Message
+    {
+        return DB::transaction(function () use ($conversation, $attributes, $preview) {
+            $message = Message::create($attributes);
+            $conversation->update([
+                'last_message_at' => $message->sent_at,
+                'preview' => $preview,
+                'is_read' => $message->direction === 'outbound',
+            ]);
+            $conversation->increment('messages_count');
+            return $message;
+        });
+    }
+
+    /** Import arrivals first, then resume older history using stable UIDs. */
+    protected function syncImapHeaders($mbox, EmailAccount $account, string $folderName, array &$folders, int $validity, float $deadline): int
+    {
+        $state = $folders[$folderName] ?? [];
+        if (isset($state['uidvalidity']) && (int) $state['uidvalidity'] !== $validity) {
+            $state = []; // UIDs were reassigned by the provider.
+        }
+        $state['uidvalidity'] = $validity;
+        $last = (int) ($state['last_uid'] ?? 0);
+        $oldest = (int) ($state['oldest_uid'] ?? 0);
+        $arrivals = $last > 0 ? array_values(array_filter(
+            $this->imapSearchUids($mbox, 'UID '.($last + 1).':*'), fn ($uid) => $uid > $last)) : [];
+        sort($arrivals); // Never advance past an unprocessed arrival.
+        $history = [];
+        if (!($state['backfill_done'] ?? false)) {
+            $history = $oldest === 1 ? [] : $this->imapSearchUids($mbox, $oldest > 1 ? 'UID 1:'.($oldest - 1) : 'ALL');
+            rsort($history);
+        }
+        $count = 0;
+        foreach (['arrivals' => $arrivals, 'history' => $history] as $lane => $uids) {
+            foreach (array_chunk($uids, 50) as $batch) {
+                if (microtime(true) >= $deadline) {
+                    $state['headers_pending'] = true;
+                    $folders[$folderName] = $state;
+                    $account->update(['sync_folders' => $folders]);
+                    return $count;
+                }
+                $overviews = $this->imapOverviews($mbox, $batch);
+                // A failed fetch/insert must leave the cursor before this batch.
+                if (count($overviews) !== count($batch)) throw new \RuntimeException('Incomplete IMAP header batch; retrying.');
+                foreach ($overviews as $overview) {
+                    $overview->uidvalidity = $validity;
+                    if (!$mbox instanceof SyncImapMailbox && (empty($overview->from) || empty($overview->message_id))) {
+                        $raw = @imap_fetchheader($mbox, $overview->uid, FT_UID);
+                        if ($raw) {
+                            $parsed = imap_rfc822_parse_headers($raw);
+                            $overview->from = $parsed->fromaddress ?? $overview->from ?? '';
+                            $overview->message_id = $parsed->message_id ?? $overview->message_id ?? null;
+                        }
+                    }
+                    if ($this->processImapOverview($overview, $account, $folderName)) $count++;
+                }
+                $state['last_uid'] = max((int) ($state['last_uid'] ?? 0), max($batch));
+                // New arrivals must not move the history cursor backwards.
+                if ($lane === 'history') $state['oldest_uid'] = min($batch);
+                $folders[$folderName] = $state;
+                $account->update(['sync_folders' => $folders]);
             }
         }
+        $state['backfill_done'] = true;
+        $state['headers_pending'] = false;
+        $folders[$folderName] = $state;
+        $account->update(['sync_folders' => $folders]);
+        return $count;
+    }
 
-        return $newCount;
+    protected function imapSearchUids($mbox, string $criteria): array
+    {
+        if ($mbox instanceof SyncImapMailbox) return $mbox->search($criteria);
+        imap_errors(); // Clear old errors before distinguishing an empty search from failure.
+        $uids = @imap_search($mbox, $criteria, SE_UID);
+        if ($uids === false && imap_last_error()) throw new \RuntimeException('IMAP UID search failed.');
+        return $uids ?: [];
+    }
+
+    protected function imapOverviews($mbox, array $uids): array
+    {
+        if ($mbox instanceof SyncImapMailbox) return $mbox->overviews($uids);
+        return @imap_fetch_overview($mbox, implode(',', $uids), FT_UID) ?: [];
     }
 
     /**
@@ -513,14 +484,12 @@ class EmailSyncService
         $contact = $this->findOrCreateContact($account, $fromAddress, $fromName, $direction, $toAddresses);
         $conversation = $this->findOrCreateConversation($account, $contact, $subject, $messageIdHeader, $inReplyTo, $referencesArray);
 
-        $preview = Str::limit($subject, 200);
-
         try {
             $message = DB::transaction(function () use (
                 $conversation, $account, $direction, $subject, $fromAddress, $fromName,
                 $toAddresses, $messageIdHeader, $inReplyTo, $referencesArray, $date, $ov, $folderName
             ) {
-                return Message::create([
+                return $this->storeImportedMessage($conversation, [
                     'conversation_id' => $conversation->id,
                     'workspace_id' => $account->workspace_id,
                     'uuid' => Str::uuid(),
@@ -544,18 +513,11 @@ class EmailSyncService
                     'delivered_at' => $date,
                     'imap_uid' => $ov->uid ?? null,
                     'imap_folder' => $folderName,
-                ]);
+                ], Str::limit($subject, 200));
             });
         } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
             return false;
         }
-
-        $conversation->update([
-            'last_message_at' => $message->sent_at,
-            'preview' => $preview,
-            'is_read' => $direction === 'outbound',
-        ]);
-        $conversation->increment('messages_count');
 
         return true;
     }
@@ -618,6 +580,29 @@ class EmailSyncService
         $uid = $msg->imap_uid;
         if (! $uid) return false;
 
+        if ($mbox instanceof SyncImapMailbox) {
+            $remote = $mbox->message((int) $uid);
+            $account = ($conversation ?? $msg->conversation)?->emailAccount;
+            if (!$account) return false;
+            $identity = $this->messageIdentity($remote->getMessageId()->toString(), $account,
+                'imap:'.($msg->imap_folder ?: 'INBOX').':'.$mbox->uidValidity().':'.$uid);
+            if (trim($identity, '<>') !== trim((string) $msg->message_id_header, '<>')) {
+                throw new \RuntimeException('Stored IMAP UID no longer identifies this email. Sync the mailbox again.');
+            }
+            $html = $remote->getHTMLBody();
+            $text = $remote->getTextBody();
+            DB::transaction(function () use ($msg, $conversation, $remote, $html, $text) {
+                $msg->update(['body_html' => $html !== '' ? Str::limit($html, 15000000, '') : null,
+                    'body_text' => Str::limit($text, 15000000, '')]);
+                if ($conversation && $msg->sent_at && ($html !== '' || $text !== '')) {
+                    Conversation::whereKey($conversation->id)->where('last_message_at', $msg->sent_at)
+                        ->update(['preview' => Str::limit($text ?: strip_tags($html), 200)]);
+                }
+                foreach ($remote->getAttachments() as $attachment) $this->saveAttachment($attachment, $msg);
+            });
+            return true;
+        }
+
         $structure = @imap_fetchstructure($mbox, $uid, FT_UID);
         if (! $structure) return false;
 
@@ -644,6 +629,18 @@ class EmailSyncService
         return true;
     }
 
+    public function fetchBodyForMessage(Message $message): bool
+    {
+        $conversation = $message->conversation;
+        $account = $conversation?->emailAccount;
+        if (!$account || !$message->imap_uid || !in_array($account->provider, ['imap', 'custom'], true)) return false;
+        $mailbox = SyncImapMailbox::connect($account, 8);
+        try {
+            $mailbox->select($message->imap_folder ?: 'INBOX');
+            return $this->fetchMessageByUid($mailbox, $message, $conversation);
+        } finally { $mailbox->close(); }
+    }
+
     /**
      * Fetch all missing message bodies for a conversation in a single IMAP connection.
      */
@@ -658,38 +655,13 @@ class EmailSyncService
 
         if ($pendingMessages->isEmpty()) return;
 
-        $password = str_replace(' ', '', $account->imap_password ?? '');
-        $host = $account->imap_host;
-        $port = $account->imap_port ?? 993;
-        $encryption = $account->imap_encryption ?? 'ssl';
-        $folder = $pendingMessages->first()->imap_folder ?? 'INBOX';
-
-        $flags = '/imap';
-        if ($encryption === 'ssl') {
-            $flags .= '/ssl/novalidate-cert';
-        } elseif ($encryption === 'tls') {
-            $flags .= '/tls/novalidate-cert';
-        }
-
-        @imap_timeout(IMAP_OPENTIMEOUT, 15);
-        @imap_timeout(IMAP_READTIMEOUT, 15);
-
-        $mbox = @imap_open("{{$host}:{$port}{$flags}}{$folder}", $account->imap_username, $password, 0, 1);
-        if (! $mbox) {
-            return;
-        }
-
-        $fetched = 0;
+        $mailbox = SyncImapMailbox::connect($account, 10);
         try {
-            foreach ($pendingMessages as $msg) {
-                if ($this->fetchMessageByUid($mbox, $msg, $conversation)) {
-                    $fetched++;
-                }
+            foreach ($pendingMessages->groupBy(fn ($message) => $message->imap_folder ?: 'INBOX') as $folder => $messages) {
+                $mailbox->select($folder);
+                foreach ($messages as $message) $this->fetchMessageByUid($mailbox, $message, $conversation);
             }
-        } finally {
-            @imap_close($mbox);
-        }
-
+        } finally { $mailbox->close(); }
     }
 
     /**
@@ -899,7 +871,7 @@ class EmailSyncService
                 $toAddresses, $ccAddresses, $bccAddresses, $messageIdHeader, $inReplyTo,
                 $referencesArray, $bodyHtml, $bodyText, $date, $imapMessage
             ) {
-                $message = Message::create([
+                $message = $this->storeImportedMessage($conversation, [
                     'conversation_id' => $conversation->id,
                     'workspace_id' => $account->workspace_id,
                     'uuid' => Str::uuid(),
@@ -921,7 +893,7 @@ class EmailSyncService
                     'delivery_status' => 'delivered',
                     'sent_at' => $date ?? now(),
                     'delivered_at' => $date ?? now(),
-                ]);
+                ], Str::limit($bodyText ?? strip_tags($bodyHtml ?? ''), 200));
 
                 // Process attachments inside the transaction
                 foreach ($imapMessage->getAttachments() as $attachment) {
@@ -934,14 +906,6 @@ class EmailSyncService
             // Concurrent sync already created this message — skip safely
             return false;
         }
-
-        // Update conversation — use DB increment instead of count() query
-        $conversation->update([
-            'last_message_at' => $message->sent_at,
-            'preview' => Str::limit($bodyText ?? strip_tags($bodyHtml ?? ''), 200),
-            'is_read' => $direction === 'outbound',
-        ]);
-        $conversation->increment('messages_count');
 
         return true;
     }
@@ -1154,7 +1118,7 @@ class EmailSyncService
         }
 
         try {
-            $message = Message::create([
+            $message = $this->storeImportedMessage($conversation, [
                 'conversation_id' => $conversation->id,
                 'workspace_id' => $account->workspace_id,
                 'uuid' => Str::uuid(),
@@ -1177,7 +1141,7 @@ class EmailSyncService
                 'delivery_status' => 'delivered',
                 'sent_at' => $sentAt,
                 'delivered_at' => $sentAt,
-            ]);
+            ], Str::limit($bodyText ?? strip_tags($bodyHtml ?? ''), 200));
         } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
             return false; // Already exists — skip silently
         }
@@ -1186,14 +1150,6 @@ class EmailSyncService
         foreach ($attachments as $att) {
             $this->saveGmailAttachment($att, $message, $gmailMessage, $account);
         }
-
-        // Use DB increment instead of count() query
-        $conversation->update([
-            'last_message_at' => $message->sent_at,
-            'preview' => Str::limit($bodyText ?? strip_tags($bodyHtml ?? ''), 200),
-            'is_read' => $direction === 'outbound',
-        ]);
-        $conversation->increment('messages_count');
 
         return true;
     }
@@ -1426,7 +1382,7 @@ class EmailSyncService
         $contact = $this->findOrCreateContact($account, $fromAddress, $fromName, $direction, $toAddresses);
         $conversation = $this->findOrCreateConversation($account, $contact, $subject, $messageIdHeader, $inReplyTo, $referencesArray);
 
-        $message = Message::create([
+        $message = $this->storeImportedMessage($conversation, [
             'conversation_id' => $conversation->id,
             'workspace_id' => $account->workspace_id,
             'uuid' => Str::uuid(),
@@ -1449,20 +1405,12 @@ class EmailSyncService
             'delivery_status' => 'delivered',
             'sent_at' => $date,
             'delivered_at' => $date,
-        ]);
+        ], Str::limit($bodyText ?? strip_tags($bodyHtml ?? ''), 200));
 
         // Fetch and save attachments if present
         if ($graphMessage['hasAttachments'] ?? false) {
             $this->fetchOutlookAttachments($graphMessage['id'], $message, $account, $httpClient, $accessToken);
         }
-
-        // Use DB increment instead of count() query
-        $conversation->update([
-            'last_message_at' => $message->sent_at,
-            'preview' => Str::limit($bodyText ?? strip_tags($bodyHtml ?? ''), 200),
-            'is_read' => $direction === 'outbound',
-        ]);
-        $conversation->increment('messages_count');
 
         return true;
     }

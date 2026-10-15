@@ -94,7 +94,7 @@ test('foreground and worker Gmail imports cannot race their saved cursors', func
     $service = new GmailPaginationFixture([]);
     $lock = Cache::lock('email-import:1', 180); $lock->get();
     try {
-        expect($service->syncBatch(EmailAccount::findOrFail(1)))->toBe([0, false]);
+        expect($service->syncBatch(EmailAccount::findOrFail(1)))->toBe([0, true]);
         expect($service->requests)->toBeEmpty();
     } finally { $lock->release(); }
 });

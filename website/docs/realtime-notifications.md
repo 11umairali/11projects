@@ -1,5 +1,196 @@
 # Realtime updates and device notifications
 
+## Email phone alerts and reference card: 1.0.22+11
+
+Deploy all updated website files and rebuild/install Flutter **1.0.22+11**.
+Run `php artisan optimize:clear` and `php artisan queue:restart`; keep the email
+scheduler/worker running. No migration or new dependency is introduced.
+
+Email now calls the same FCM sender as chat directly after saving its notification.
+The database-notification listener skips that explicitly handled notification, so
+there is one send per device, even when event discovery/cache is stale. The phone
+and notification center share the same notification UUID and reply target. Failed
+provider acceptance logs `Email push was not accepted` with account/message IDs.
+
+Android background polling no longer assumes registration proves delivery or
+marks a skipped alert as shown. It can post a missing email alert; native receipt
+IDs prevent replay when Firebase already posted it. APNs retains ownership of iOS
+background alerts. Foreground behavior follows chat: an open app uses its in-app
+banner; background/locked phone delivery uses the system notification.
+
+The Android content follows the supplied 00.png reference: brand with category
+badge at left, sender above a bounded preview, and relative time above a circular
+sender photo at right. Native View and RemoteInput Reply buttons sit underneath.
+View keeps its existing same-notification full-text behavior; Reply sends inline.
+Non-replyable events show View only. Android owns button positioning and the
+mandatory app-identity/expand controls around custom content; apps targeting
+Android 12+ cannot remove that system header. Compact lock-screen action visibility
+also depends on the OS/privacy settings. No duplicate app-authored title/header
+or separate custom action row is added.
+
+Regression checks exercise saved Message records through database notification
+persistence and FCM HTTP requests, with/without NotificationSent listeners. Native
+checks render the actual Android framework wrapper, action row, and custom content.
+These do not certify production FCM credentials or a Xiaomi lock-screen rendering.
+After deployment, lock/background the phone and send a new email alongside a chat.
+If email still fails, inspect `Email push was not accepted`, `Message alert unavailable`
+and the existing `php artisan push:status --user=USER_ID --test` diagnostics.
+
+## Socket IMAP sync and standard Android notifications: 1.0.21+10
+
+Deploy the updated website files and rebuild/install Flutter **1.0.21+10**.
+Run `php artisan optimize:clear` and `php artisan queue:restart` after deployment.
+No new dependency or migration is required; keep the existing scheduler and mail
+worker running. Uploading PHP alone cannot change an installed Android banner.
+
+- IMAP sync now uses the installed Webklex pure-PHP transport used by webmail.
+  It no longer requires the undeclared PHP IMAP extension. Foreground sync still
+  imports headers first; workers hydrate bodies separately.
+- Regular passwords retain spaces. Only Gmail's displayed grouped app-password
+  separators are removed. The default Sent folder resolves special-use/namespace
+  aliases such as INBOX.Sent. A missing optional folder no longer fails a working
+  Inbox, and is checked again on later syncs.
+- The mobile body endpoint fetches missing full content from the actual IMAP UID
+  after authorization. View can load the notified email before a worker hydrates
+  it. Fetches use PEEK and do not mark the email read. A reused UID cannot
+  load another email into the notification; its Message-ID is checked first.
+- Failed accounts return a safe account-specific description. Manual refresh shows
+  the account and reconnect/connection guidance, while healthy accounts finish
+  their pending pages. Automatic sync remains retryable. Server logs include
+  account ID, provider, exception class and failure code for further diagnosis.
+- Android now uses the standard MessagingStyle template, sender avatar and native
+  View/RemoteInput Reply actions throughout initial delivery. The duplicate custom
+  brand card and its reserved blank space are removed. View fetches full content
+  into the same notification; Reply sends from the system inline composer. Neither
+  action opens an Activity. Events without a reply target offer View only.
+- Android controls compact/locked action visibility, available text height,
+  timestamp formatting and expansion. Expand the notification to access the full
+  action row; device privacy settings may require unlocking for Reply. App code
+  cannot force an OEM's collapsed lock-screen card to expand. Existing iOS system
+  limitations described below still apply.
+
+Validation includes an actual local Dovecot socket with PHP ext-imap absent:
+new arrivals, repeated refresh/no duplicates, passwords with spaces, missing Sent,
+INBOX.Sent resolution, full body fetch, read-flag preservation, access rejection
+and wrong-password failure. Android tests render the framework's actual expanded
+and heads-up templates with View/Reply; they do not simulate Xiaomi SystemUI or
+certify production FCM/provider credentials.
+
+The opt-in PHP socket regression is `tests/Unit/ImapSocketSyncTest.php`. Use only a
+disposable loopback IMAP fixture at port 1143 (override with IMAP_TEST_PORT), user
+`sync@example.test`, with a private file holding its exact password, initially no
+Sent/INBOX.Sent folder. It appends synthetic mail and creates/deletes INBOX.Sent:
+
+```sh
+IMAP_TEST_PASSWORD_FILE=/private/path/fixture-password php artisan test tests/Unit/ImapSocketSyncTest.php
+```
+
+The previous custom Android layout descriptions below are historical and are
+superseded by this release.
+
+## Profile, safe mail refresh and inline system actions: 1.0.20+9
+
+Deploy the updated website files, run `php artisan view:clear`, and rebuild/install
+Flutter **1.0.20+9**. No new database migration or dependency is required.
+
+- `/people/u/{username}` and numeric-ID profiles now render correctly. Mixing
+  inline and block Blade PHP directives swallowed the profile's detail variables.
+  Public discovered profiles still omit private email/contact actions.
+- Manual mail refresh observes the provider sync and inbox reload futures together.
+  A fast provider failure during a slow inbox GET is handled by the existing error
+  message. Already imported mail still reloads. Genuine provider/authentication
+  failures still require fixing the connected account; they are not successful syncs.
+- Android has one system action row with standard button dimensions. View and
+  Reply are broadcasts, never Activity intents. Reply uses genuine Android
+  RemoteInput and the existing authenticated background sender. The custom card
+  keeps the smaller brand/category badge, sender, time and trailing avatar.
+- View fetches the exact notified message and replaces the same notification ID
+  with Android's native large-text view. It preserves the original channel,
+  does not mark chat history read, and does not open an app page. Failed fetches
+  retain the original preview and offer View again. Dismiss/account-switch checks
+  run before and after fetching. Missing message IDs in old payloads can only
+  display that notification's own preview.
+- SystemUI controls notification expansion, maximum visible text, action visibility
+  in compact/heads-up states, lock-screen privacy and keyboard placement. View
+  updates an expanded notification; it cannot force an OEM's collapsed banner
+  open or fit an unlimited email into the system's text/height limit. Android 12+
+  retains its mandatory app-identity header. The duplicate custom action row is gone.
+- iOS View categories no longer request app foregrounding; native inline Reply
+  remains available. Programmatic expansion/custom rich content on iOS requires a
+  notification content extension, which this app does not have. Use the system
+  long-press expansion; Firebase/APNs remote View cannot be guaranteed to update
+  an existing delivered alert. Physical Android/iOS delivery and OEM presentation
+  must be checked on devices; sandbox tests cover native intents/layout and mocked
+  message fetch/send behavior.
+
+The 1.0.19 description below records the earlier implementation; its custom
+button navigation behavior is superseded by this update.
+
+## Banner actions and website rendering correction: 1.0.19+8
+
+Upload the corrected Laravel files, run `php artisan optimize:clear` (including
+compiled views), and rebuild/install Flutter **1.0.19+8**. No schema migration is
+introduced by this correction.
+
+- Fixed the notification avatar's Alpine `@error` shorthand being interpreted
+  as Blade's validation directive in the shared app layout. This caused a PHP
+  parse error after login across dashboard and other authenticated pages.
+- Fixed invalid PHP string escaping in the input/select/textarea components by
+  serializing their pattern/error values with Blade's `@js` directive.
+- Removed the optional Android decorated wrapper and repeated category header.
+  Android 12+ can still display its mandatory system app-identity header;
+  applications targeting current Android cannot remove that system UI.
+- View and Reply now live inside compact, expanded and heads-up custom content,
+  rather than relying on the OEM's native action row. View opens the full-message
+  sheet; Reply opens the app's composer directly. Non-message events, outbound
+  delivery-status notices and notifications without a valid message target show
+  View only. Existing iOS/native fallback inline reply handling remains available.
+- Native targets now accept the same chat sender IDs and local inbox conversation
+  URLs as Flutter, so polling/older push envelopes can expose Reply too.
+- Compact content stays within Android's 48dp budget. At enlarged system font
+  sizes it prioritizes sender/actions; View and expansion expose the full body.
+
+Verification: all 277 Blade templates parsed, 34 main website pages rendered with
+synthetic data, and focused Android layout/action and Flutter delivery tests
+passed. Physical-device/OEM presentation and production transport still need a
+signed-device check after installation.
+
+## Email import and notification follow-up: 1.0.18+7
+
+Deploy the Laravel changes and rebuild/install Flutter **1.0.18+7** together.
+No new database migration is required. Keep the scheduler and `email-sync`
+worker running, then run `php artisan optimize:clear` and
+`php artisan queue:restart` through the normal deployment process.
+
+- IMAP, custom IMAP and Outlook foreground/worker imports now share an account
+  lock. Busy imports report pending work to app refreshes, including Gmail.
+- IMAP imports arrivals by stable UID before resuming historical mail below the
+  saved history cursor. Failed batches retain their cursor for retry; UIDVALIDITY
+  changes reset it. Mail body backfills are restricted to the connected account.
+- Message imports commit the conversation preview/count together with the new
+  message before realtime events run, so listeners read the saved list state.
+- Foreground Outlook imports advance the sync watermark from the request start.
+  SMTP and Gmail MIME preserve the locally stored Message-ID, allowing imported
+  sent copies to match the original row.
+- Firebase and polling presentation are serialized. Native/OS deliveries are
+  remembered across app resume; Android also suppresses repeated deliveries
+  after a notification is dismissed. Existing duplicate database rows are retained.
+- Website banners and the bell dropdown use sender photo (initials when missing),
+  category badge, full name, message preview and a trailing compact relative time.
+  Available sender profile pictures/names are included in new email alerts.
+- Android system notifications retain app logo/category badge, sender/content,
+  time above the right avatar, and View/inline Reply for incoming messages.
+  View expands the notified message; non-replyable events offer View only.
+  iOS retains its native View/Reply categories; Apple controls system placement.
+- Launch artwork is reduced from 288 to 192 logical pixels on Flutter/iOS,
+  with matching reduced art inside Android's fixed system splash canvas.
+
+Use a signed physical phone to verify new mail on an open Mail screen, return
+from Chats, pull-to-refresh, app resume, dismissed push redelivery, full-message
+View and sending an inline Reply. Production mail servers and FCM/APNs transport
+require the deployment's existing provider configuration and registered devices.
+Synthetic test and render checks do not certify that production transport.
+
 ## Email refresh and notification layout correction: 1.0.17+6
 
 Deploy both the Laravel files and rebuilt Flutter app from this update. It

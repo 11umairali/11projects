@@ -37,7 +37,7 @@ test('overview sync skips both existing ID forms including deleted mail before c
 test('sync watermark is the start time so mail arriving during sync is not skipped', function () {
     config(['database.default' => 'sqlite', 'database.connections.sqlite.database' => ':memory:', 'activitylog.enabled' => false]);
     DB::purge('sqlite');
-    DB::statement('CREATE TABLE email_accounts (id INTEGER PRIMARY KEY, workspace_id INTEGER, provider TEXT, status TEXT, last_synced_at TEXT, error_message TEXT, deleted_at TEXT, created_at TEXT, updated_at TEXT)');
+    DB::statement('CREATE TABLE email_accounts (id INTEGER PRIMARY KEY, workspace_id INTEGER, provider TEXT, status TEXT, last_synced_at TEXT, sync_folders TEXT, error_message TEXT, deleted_at TEXT, created_at TEXT, updated_at TEXT)');
     DB::table('email_accounts')->insert(['id' => 1, 'workspace_id' => 7, 'provider' => 'imap', 'status' => 'connected', 'last_synced_at' => '2026-10-01 10:00:00']);
     $service = new class extends EmailSyncService {
         protected function syncImap(EmailAccount $account): int {
@@ -59,12 +59,13 @@ test('sync watermark is the start time so mail arriving during sync is not skipp
 test('foreground IMAP import uses the header path and anchors sync before the request', function () {
     config(['database.default' => 'sqlite', 'database.connections.sqlite.database' => ':memory:', 'activitylog.enabled' => false]);
     DB::purge('sqlite');
-    DB::statement('CREATE TABLE email_accounts (id INTEGER PRIMARY KEY, workspace_id INTEGER, provider TEXT, status TEXT, last_synced_at TEXT, error_message TEXT, deleted_at TEXT, created_at TEXT, updated_at TEXT)');
+    DB::statement('CREATE TABLE email_accounts (id INTEGER PRIMARY KEY, workspace_id INTEGER, provider TEXT, status TEXT, last_synced_at TEXT, sync_folders TEXT, error_message TEXT, deleted_at TEXT, created_at TEXT, updated_at TEXT)');
     DB::table('email_accounts')->insert(['id' => 1, 'workspace_id' => 7, 'provider' => 'imap', 'status' => 'connected']);
     $service = new class extends EmailSyncService {
         protected function syncImap(EmailAccount $account): int { throw new RuntimeException('HTTP refresh must not run the full body backfill.'); }
         protected function syncImapMailbox(EmailAccount $account, bool $foreground = false): int {
             expect($foreground)->toBeTrue();
+            $account->sync_folders = ['INBOX' => ['backfill_done' => true]];
             \Carbon\Carbon::setTestNow('2026-10-15 12:01:00');
             return 2;
         }

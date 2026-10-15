@@ -63,4 +63,24 @@ void main() {
     session.dispose();
   });
 
+  test('a failed mailbox does not stop healthy pagination and manual errors identify the account', () async {
+    final session = Session()..token = 'synthetic'..user = {'id': 1};
+    var calls = 0;
+    await http.runWithClient(() async {
+      await expectLater(MailSync.sync(session, afterCurrent: true), throwsA(isA<ApiException>()
+          .having((e) => e.message, 'actionable error', contains('broken@example.test: Mail server sign-in failed'))));
+      expect(calls, 2);
+    }, () => MockClient((request) async {
+      calls++;
+      if (calls == 1) {
+        return http.Response(jsonEncode({'synced': 1, 'has_more': true, 'failed_accounts': 1,
+        'failures': [{'account_id': 4, 'email': 'broken@example.test', 'code': 'authentication_failed',
+          'message': 'Mail server sign-in failed. Reconnect this account in Connected accounts.'}]}), 200);
+      }
+      expect(jsonDecode(request.body)['skip_accounts'], [4]);
+      return http.Response('{"synced":1,"has_more":false,"failed_accounts":0}', 200);
+    }));
+    session.dispose();
+  });
+
 }
