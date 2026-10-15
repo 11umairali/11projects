@@ -59,7 +59,14 @@ class _CallPresentationState extends State<CallPresentation> {
         builder: (context, data, _) => data == null ? const SizedBox.shrink() : SafeArea(bottom: false, child: Dismissible(
           key: ValueKey(data), direction: DismissDirection.up, onDismissed: (_) => NotifyService.I.dismissBanner(),
           child: Material(elevation: 6, shadowColor: Colors.black26, clipBehavior: Clip.antiAlias, borderRadius: BorderRadius.circular(18), color: Theme.of(context).colorScheme.surface,
-            child: NotificationTile(notification: data, compact: true, onTap: () {
+            child: NotificationTile(notification: data, compact: true,
+              onView: () {
+                NotifyService.I.dismissBanner(); NotifyService.I.openRemote({...data, 'notification_action': 'view'});
+              },
+              onReply: () {
+                NotifyService.I.dismissBanner(); NotifyService.I.openRemote({...data, 'notification_action': 'reply'});
+              },
+              onTap: () {
               NotifyService.I.dismissBanner(); NotifyService.I.openRemote(data);
             })),
         )),

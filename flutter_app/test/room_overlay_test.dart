@@ -132,6 +132,25 @@ void main() {
     NotifyService.I.dismissBanner();
   });
 
+  testWidgets('foreground message actions dismiss the banner and preserve the selected message', (tester) async {
+    RoomHost.I.engine = null;
+    await tester.pumpWidget(MaterialApp(navigatorKey: rootNavKey,
+      builder: (_, child) => CallPresentation(child: child!), home: const Scaffold(body: Text('Chats'))));
+    for (final action in ['view', 'reply']) {
+      NotifyService.I.showBanner({'sender_name': 'Alexandra Morgan', 'body': 'New message',
+        'type': 'chat', 'from_id': '2', 'message_id': '42'});
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(action.toUpperCase()));
+      await tester.pumpAndSettle();
+      expect(find.byType(NotificationTile), findsNothing);
+      expect(NotifyService.I.pendingNotification?['notification_action'], action);
+      expect(NotifyService.I.pendingNotification?['message_id'], '42');
+      expect(NotifyService.I.pendingNotification?['from_id'], '2');
+    }
+    NotifyService.I.pendingNotification = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('audio and video mini views expand and minimize without losing the engine', (tester) async {
     await tester.pumpWidget(ChangeNotifierProvider.value(value: session, child: MaterialApp(navigatorKey: rootNavKey,
       builder: (_, child) => CallPresentation(child: child!), home: const Scaffold(body: Text('Chats')))));
