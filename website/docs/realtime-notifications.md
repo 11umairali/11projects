@@ -1,5 +1,25 @@
 # Realtime updates and device notifications
 
+## Unified foreground notification card: 1.0.23+12
+
+Rebuild and install Flutter **1.0.23+12** to update the open-app banners and
+notification center. They now use the supplied 00.png arrangement: one brand
+mark with a category badge at left, sender full name and message preview in the
+middle, relative time above the sender's circular profile photo at right, and
+View/Reply underneath. Names can wrap to two lines; previews stay bounded.
+View opens the notified message and Reply uses the existing reply composer.
+Events without a reply target offer View only. Foreground actions dismiss the
+banner before opening their message sheet. The notification center retains its
+read/unread name emphasis and accessibility label.
+
+Android background/locked alerts already use the same brand/category, sender,
+time and avatar arrangement with native View/RemoteInput Reply actions.
+Android controls its required app header, action row and lock-screen expansion;
+that header may display the app icon in addition to the content's brand mark.
+iOS retains Apple's native alert/action layout. This release changes the shared
+Flutter card; it cannot replace either platform's system notification container.
+No server, schema or notification-delivery configuration changes are needed.
+
 ## Email phone alerts and reference card: 1.0.22+11
 
 Deploy all updated website files and rebuild/install Flutter **1.0.22+11**.

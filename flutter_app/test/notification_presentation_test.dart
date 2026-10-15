@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dahimail/core/notification_presentation.dart';
 import 'package:dahimail/core/notification_tile.dart';
-import 'package:dahimail/core/brand.dart';
 import 'package:dahimail/core/widgets.dart';
 
 void main() {
@@ -39,7 +38,7 @@ void main() {
     expect(hasMessageReceipt({'mine': false, 'message_kind': 'text'}), false);
   });
 
-  testWidgets('missed call card has a category, caller, time and unread dot without read receipts', (tester) async {
+  testWidgets('missed call card has one brand mark, a category, caller and time above the right avatar', (tester) async {
     final semantics = tester.ensureSemantics();
     var tapped = false;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: NotificationTile(
@@ -47,10 +46,12 @@ void main() {
       onTap: () => tapped = true,
     ))));
     expect(find.text('Alice'), findsOneWidget);
-    expect(find.byType(BrandLogo), findsNothing);
-    expect(tester.getCenter(find.byType(Avatar)).dx, lessThan(tester.getCenter(find.text('Alice')).dx));
+    expect(find.bySemanticsLabel('Dahimail'), findsOneWidget);
+    expect(find.text('VIEW'), findsOneWidget);
+    expect(find.text('REPLY'), findsNothing);
+    expect(tester.getCenter(find.byType(Avatar)).dx, greaterThan(tester.getCenter(find.text('Alice')).dx));
     expect(find.text('2m ago'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('2m ago')).dy, tester.getTopLeft(find.text('Alice')).dy);
+    expect(tester.getTopLeft(find.byType(Avatar)).dy, greaterThan(tester.getBottomLeft(find.text('2m ago')).dy));
     expect(tester.getCenter(find.text('2m ago')).dx, greaterThan(tester.getCenter(find.text('Alice')).dx));
     expect(find.bySemanticsLabel(RegExp('Unread')), findsOneWidget);
     expect(find.byIcon(Icons.videocam_off_rounded), findsOneWidget);

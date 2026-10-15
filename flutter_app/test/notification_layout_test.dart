@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('all internal categories fit narrow screens and enlarged text without external action buttons', (tester) async {
+  testWidgets('reference notification cards fit narrow screens and enlarged text with message actions', (tester) async {
     final font = FontLoader('Inter')..addFont(rootBundle.load('assets/fonts/Inter-Variable.ttf'));
     await font.load();
     await (FontLoader('MaterialIcons')..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
@@ -20,7 +20,7 @@ void main() {
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(MaterialApp(theme: AppTheme.light(), home: Scaffold(body:
           MediaQuery(data: MediaQueryData(size: Size(width, 700), textScaler: TextScaler.linear(scale)), child:
-            RepaintBoundary(key: boundary, child: ColoredBox(color: AppColors.bg, child: ListView(padding: const EdgeInsets.all(12), children: [
+            RepaintBoundary(key: boundary, child: ColoredBox(color: AppColors.bg, child: SingleChildScrollView(padding: const EdgeInsets.all(12), child: Column(children: [
               for (final type in ['email_received', 'chat', 'missed_call', 'friend_request']) AppCard(
                 padding: EdgeInsets.zero,
                 child: NotificationTile(notification: {
@@ -28,16 +28,26 @@ void main() {
                   'body': type == 'email_received' ? 'Project update · The new designs are ready for your review.' :
                     type == 'chat' ? 'Are you free to talk this afternoon?' :
                     type == 'missed_call' ? 'Missed audio call' : 'Sent you a friend request',
-                  'reply_kind': 'conversation', 'reply_id': 1,
+                  if (type == 'email_received' || type == 'chat') ...{'reply_kind': 'conversation', 'reply_id': 1, 'action_url': '/inbox?cid=1'},
                 }, onTap: () {}),
               ),
-            ]))),
+            ])))),
           ),
         )));
+        await tester.runAsync(() => precacheImage(const AssetImage('assets/icon/icon.png'),
+          tester.element(find.byType(NotificationTile).first)));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: 'width=$width textScale=$scale');
-        expect(find.text('View'), findsNothing);
-        expect(find.text('Reply'), findsNothing);
+        expect(find.text('VIEW'), findsNWidgets(4));
+        expect(find.text('REPLY'), findsNWidgets(2));
+        expect(find.bySemanticsLabel('Dahimail'), findsNWidgets(4));
+        final sender = tester.getTopLeft(find.text('Alexandra Morgan').first);
+        final avatar = tester.getTopLeft(find.byType(Avatar).first);
+        final time = tester.getBottomLeft(find.text('2m ago').first);
+        expect(avatar.dx, greaterThan(sender.dx));
+        expect(avatar.dy, greaterThanOrEqualTo(time.dy));
+        expect(tester.getTopLeft(find.text('VIEW').first).dy,
+          greaterThan(tester.getBottomLeft(find.text('Project update · The new designs are ready for your review.')).dy));
         for (final avatar in find.byType(Avatar).evaluate()) {
           final box = avatar.renderObject! as RenderBox;
           final origin = box.localToGlobal(Offset.zero);
@@ -59,5 +69,19 @@ void main() {
     }
     await tester.pumpWidget(const SizedBox.shrink());
     tester.view.resetPhysicalSize(); tester.view.resetDevicePixelRatio();
+  });
+
+  testWidgets('View and Reply invoke their own actions and leave body taps separate', (tester) async {
+    final actions = <String>[];
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: NotificationTile(
+      notification: const {'type': 'email_received', 'sender_name': 'Alexandra Morgan',
+        'body': 'Ready for review', 'action_url': '/inbox?cid=7'},
+      onTap: () => actions.add('open'), onView: () => actions.add('view'),
+      onReply: () => actions.add('reply'),
+    ))));
+    await tester.tap(find.text('VIEW'));
+    await tester.tap(find.text('REPLY'));
+    await tester.tap(find.text('Ready for review'));
+    expect(actions, ['view', 'reply', 'open']);
   });
 }
