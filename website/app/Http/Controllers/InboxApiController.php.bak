@@ -1,0 +1,347 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Conversation;
+use App\Models\Message;
+use App\Models\Tag;
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+
+class InboxApiController extends Controller
+{
+    /**
+     * GET /inbox/api/conversations
+     * Returns paginated conversations for the conversation list.
+     */
+    public function conversations(Request $request): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+        if (!$workspaceId) return response()->json(['data' => [], 'has_more' => false]);
+
+        $perPage = 20;
+        $page = max(1, (int) $request->get('page', 1));
+        $channel = $request->get('channel', 'all');
+        $folder = $request->get('folder', 'inbox');
+        $search = $request->get('search', '');
+        $tag = $request->get('tag', '');
+        $assignee = $request->get('assignee');
+        $accountId = $request->get('account_id');
+        $sortBy = $request->get('sort', 'newest');
+
+        $query = Conversation::where('workspace_id', $workspaceId)
+            ->with(['contact', 'assignedTo', 'tagModels']);
+
+        // Channel filter
+        if ($channel !== 'all') {
+            $query->where('channel', $channel);
+        }
+
+        // Folder filter
+        match ($folder) {
+            'inbox' => $query->whereIn('status', ['open', 'pending']),
+            'sent' => $query->where('channel', 'email')
+                ->whereHas('messages', fn ($q) => $q->where('direction', 'outbound')),
+            'starred' => $query->where('is_starred', true),
+            'snoozed' => $query->where('status', 'snoozed'),
+            'spam' => $query->where('status', 'spam'),
+            'archive' => $query->where('status', 'closed'),
+            default => null,
+        };
+
+        if ($accountId) {
+            $query->where('email_account_id', $accountId);
+        }
+
+        if ($tag) {
+            $query->whereHas('tagModels', fn ($q) => $q->where('name', $tag));
+        }
+
+        if ($assignee) {
+            $query->where('assigned_to', $assignee);
+        }
+
+        if ($search) {
+            $term = '%' . addcslashes($search, '%_') . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('subject', 'like', $term)
+                    ->orWhere('preview', 'like', $term)
+                    ->orWhereHas('contact', fn ($cq) => $cq->where('first_name', 'like', $term)
+                        ->orWhere('last_name', 'like', $term)
+                        ->orWhere('email', 'like', $term));
+            });
+        }
+
+        // Sorting
+        match ($sortBy) {
+            'oldest' => $query->orderBy('last_message_at')->orderBy('created_at'),
+            'priority' => $query->orderByRaw("CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")->orderByDesc('last_message_at'),
+            'unread' => $query->orderByDesc('is_read')->orderByDesc('last_message_at'),
+            default => $query->orderByDesc('last_message_at')->orderByDesc('created_at'),
+        };
+
+        $offset = ($page - 1) * $perPage;
+        $conversations = $query->skip($offset)->take($perPage + 1)->get();
+        $hasMore = $conversations->count() > $perPage;
+        $conversations = $conversations->take($perPage);
+
+        $data = $conversations->map(fn (Conversation $c) => [
+            'id' => $c->id,
+            'contact_name' => $c->contact?->full_name ?? 'Unknown',
+            'contact_initials' => $c->contact?->initials ?? '??',
+            'subject' => $c->subject ?? '(no subject)',
+            'preview' => Str::limit(preg_replace(['/\{[^}]*\}/', '/@[^{;]+[{;]/', '/\s+/'], ['', '', ' '], trim(strip_tags($c->preview ?? ''))), 120),
+            'time' => $c->last_message_at?->diffForHumans(short: true) ?? '',
+            'channel' => $c->channel,
+            'priority' => $c->priority,
+            'is_unread' => !$c->is_read,
+            'is_starred' => $c->is_starred,
+            'status' => $c->status,
+            'messages_count' => $c->messages_count,
+            'assigned_to_initials' => $c->assignedTo?->initials,
+            'assigned_to_name' => $c->assignedTo?->name,
+            'tags' => $c->tagModels->map(fn ($t) => ['name' => $t->name, 'color' => $t->color])->toArray(),
+        ]);
+
+        return response()->json(['data' => $data, 'has_more' => $hasMore, 'page' => $page]);
+    }
+
+    /**
+     * GET /inbox/api/conversations/{id}/messages
+     * Returns messages for a single conversation.
+     */
+    public function messages(int $id): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+
+        $conversation = Conversation::where('workspace_id', $workspaceId)
+            ->with(['contact', 'assignedTo', 'tagModels', 'emailAccount'])
+            ->find($id);
+
+        if (!$conversation) return response()->json(['error' => 'Not found'], 404);
+
+        // Mark as read
+        $conversation->update(['is_read' => true]);
+
+        $messages = $conversation->messages()
+            ->with(['sender', 'attachments'])
+            ->where(function ($q) {
+                $q->where('type', '!=', 'ai_draft')
+                    ->orWhere(fn ($sub) => $sub->where('type', 'ai_draft')->where('ai_status', 'draft'));
+            })
+            ->orderBy('created_at')
+            ->limit(100)
+            ->get()
+            ->map(fn (Message $m) => [
+                'id' => $m->id,
+                'direction' => $m->direction,
+                'sender_name' => $m->direction === 'inbound'
+                    ? ($m->from_name ?? $m->from_email ?? 'Unknown')
+                    : ($m->sender?->name ?? 'You'),
+                'sender_initials' => $m->direction === 'inbound'
+                    ? strtoupper(substr($m->from_name ?? '?', 0, 1) . substr(strstr($m->from_name ?? '', ' ') ?: '', 1, 1))
+                    : ($m->sender?->initials ?? 'Me'),
+                'from_email' => $m->from_email,
+                'from_name' => $m->from_name,
+                'to_emails' => $m->to_emails,
+                'has_html' => !empty($m->body_html) && str_contains($m->body_html, '<'),
+                'body_text' => Str::limit(strip_tags($m->body_html ?? $m->body_text ?? ''), 500),
+                'subject' => $m->subject,
+                'time' => $m->created_at?->diffForHumans() ?? '',
+                'date' => $m->created_at?->format('M j, Y \\a\\t g:i A') ?? '',
+                'date_group' => $m->created_at?->format('M j, Y') ?? '',
+                'channel' => $conversation->channel ?? 'email',
+                'attachments' => $m->attachments?->filter(fn ($a) => empty($a->content_id) && $a->storage_path && \Storage::disk('public')->exists($a->storage_path))->map(fn ($a) => [
+                    'id' => $a->id,
+                    'filename' => $a->original_filename,
+                    'size' => $a->size_for_humans,
+                    'url' => asset('storage/' . $a->storage_path),
+                ])->values()->toArray() ?? [],
+            ]);
+
+        // Get last message info
+        $lastMsg = $conversation->messages()->orderByDesc('created_at')->first();
+        $firstMsg = $conversation->messages()->orderBy('created_at')->first();
+
+        return response()->json([
+            'conversation' => [
+                'id' => $conversation->id,
+                'subject' => $conversation->subject,
+                'status' => $conversation->status,
+                'priority' => $conversation->priority,
+                'channel' => $conversation->channel,
+                'is_starred' => $conversation->is_starred,
+                'contact_name' => $conversation->contact?->full_name ?? 'Unknown',
+                'contact_email' => $conversation->contact?->email ?? '',
+                'contact_phone' => $conversation->contact?->phone ?? '',
+                'contact_company' => $conversation->contact?->company ?? '',
+                'contact_initials' => $conversation->contact?->initials ?? '??',
+                'assigned_to' => $conversation->assignedTo?->name,
+                'account_email' => $conversation->emailAccount?->email,
+                'tags' => $conversation->tagModels->map(fn ($t) => ['id' => $t->id, 'name' => $t->name, 'color' => $t->color])->toArray(),
+                'messages_count' => $conversation->messages_count,
+                'last_message_at' => $conversation->last_message_at?->format('M j, Y g:i A'),
+                'last_message_by' => $lastMsg?->from_name ?? $lastMsg?->sender?->name ?? 'Unknown',
+                'last_message_direction' => $lastMsg?->direction,
+                'first_message_at' => $firstMsg?->created_at?->format('M j, Y g:i A'),
+                'created_at' => $conversation->created_at?->format('M j, Y g:i A'),
+                'response_time' => $firstMsg && $conversation->messages()->where('direction', 'outbound')->exists()
+                    ? $conversation->messages()->where('direction', 'outbound')->orderBy('created_at')->first()?->created_at?->diffForHumans($firstMsg->created_at, ['parts' => 1, 'short' => true])
+                    : null,
+            ],
+            'messages' => $messages,
+        ]);
+    }
+
+    /**
+     * GET /inbox/api/poll
+     * Lightweight endpoint to check for new conversations.
+     */
+    public function poll(Request $request): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+        if (!$workspaceId) return response()->json(['count' => 0, 'latest_id' => 0]);
+
+        $lastId = (int) $request->get('last_id', 0);
+
+        $stats = Conversation::where('workspace_id', $workspaceId)
+            ->whereIn('status', ['open', 'pending'])
+            ->selectRaw('COUNT(*) as total, MAX(id) as latest_id, SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread')
+            ->first();
+
+        return response()->json([
+            'total' => $stats->total ?? 0,
+            'unread' => $stats->unread ?? 0,
+            'latest_id' => $stats->latest_id ?? 0,
+            'has_new' => $lastId > 0 && ($stats->latest_id ?? 0) > $lastId,
+        ]);
+    }
+
+    /**
+     * GET /inbox/api/sidebar
+     * Returns sidebar counts.
+     */
+    public function sidebar(): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+        if (!$workspaceId) return response()->json([]);
+
+        $base = Conversation::where('workspace_id', $workspaceId);
+
+        $folders = [
+            'inbox' => (clone $base)->whereIn('status', ['open', 'pending'])->count(),
+            'starred' => (clone $base)->where('is_starred', true)->count(),
+            'snoozed' => (clone $base)->where('status', 'snoozed')->count(),
+            'archive' => (clone $base)->where('status', 'closed')->count(),
+        ];
+
+        $channels = [
+            'email' => (clone $base)->where('channel', 'email')->count(),
+            'whatsapp' => (clone $base)->where('channel', 'whatsapp')->count(),
+            'sms' => (clone $base)->where('channel', 'sms')->count(),
+            'telegram' => (clone $base)->where('channel', 'telegram')->count(),
+            'slack' => (clone $base)->where('channel', 'slack')->count(),
+            'chat' => (clone $base)->where('channel', 'chat')->count(),
+        ];
+
+        return response()->json(['folders' => $folders, 'channels' => $channels]);
+    }
+
+    /**
+     * POST /inbox/api/conversations/{id}/action
+     * Perform actions on a conversation (star, close, reopen, spam, trash, assign, priority, snooze, tag).
+     */
+    public function action(int $id, Request $request): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+        $conv = Conversation::where('workspace_id', $workspaceId)->findOrFail($id);
+        $action = $request->input('action');
+
+        match ($action) {
+            'star' => $conv->update(['is_starred' => !$conv->is_starred]),
+            'close' => $conv->update(['status' => 'closed']),
+            'reopen' => $conv->update(['status' => 'open']),
+            'spam' => $conv->update(['status' => 'spam']),
+            'trash' => $conv->delete(),
+            'mark_read' => $conv->update(['is_read' => true]),
+            'mark_unread' => $conv->update(['is_read' => false]),
+            'assign' => $conv->update(['assigned_to' => $request->input('user_id')]),
+            'priority' => $conv->update(['priority' => $request->input('value')]),
+            'snooze' => $conv->update([
+                'status' => 'snoozed',
+                'snoozed_until' => match ($request->input('duration')) {
+                    '1h' => now()->addHour(),
+                    '3h' => now()->addHours(3),
+                    'tomorrow' => now()->addDay()->setTime(9, 0),
+                    'next_week' => now()->next('Monday')->setTime(9, 0),
+                    default => now()->addHour(),
+                },
+            ]),
+            'add_tag' => $conv->tagModels()->syncWithoutDetaching([$request->input('tag_id')]),
+            'remove_tag' => $conv->tagModels()->detach([$request->input('tag_id')]),
+            default => null,
+        };
+
+        return response()->json(['ok' => true, 'status' => $conv->fresh()->status, 'is_starred' => $conv->fresh()->is_starred]);
+    }
+
+    /**
+     * POST /inbox/api/bulk
+     * Bulk actions on multiple conversations.
+     */
+    public function bulk(Request $request): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+        $ids = $request->input('ids', []);
+        $action = $request->input('action');
+
+        $query = Conversation::where('workspace_id', $workspaceId)->whereIn('id', $ids);
+
+        match ($action) {
+            'mark_read' => $query->update(['is_read' => true]),
+            'star' => $query->update(['is_starred' => true]),
+            'archive' => $query->update(['status' => 'closed']),
+            'delete' => $query->delete(),
+            default => null,
+        };
+
+        return response()->json(['ok' => true, 'affected' => count($ids)]);
+    }
+
+    /**
+     * GET /inbox/api/tags
+     * Returns workspace tags.
+     */
+    public function tags(): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+        $tags = Tag::where('workspace_id', $workspaceId)
+            ->select(['id', 'name', 'color'])
+            ->withCount(['conversations'])
+            ->orderBy('name')
+            ->get();
+
+        return response()->json($tags);
+    }
+
+    /**
+     * GET /inbox/api/team
+     * Returns workspace team members.
+     */
+    public function team(): JsonResponse
+    {
+        $workspaceId = auth()->user()->active_workspace_id;
+        $members = User::whereHas('workspaces', fn ($q) => $q->where('workspaces.id', $workspaceId))
+            ->select(['id', 'name', 'email'])
+            ->get()
+            ->map(fn ($u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'initials' => $u->initials,
+            ]);
+
+        return response()->json($members);
+    }
+}

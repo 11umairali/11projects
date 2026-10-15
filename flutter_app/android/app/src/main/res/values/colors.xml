@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Used by the adaptive launcher icon (also written by flutter_launcher_icons) -->
+    <color name="ic_launcher_background">#2563EB</color>
+    <!-- White launch surface, matching the in-app and iOS splash -->
+    <color name="splash_bg">#FFFFFF</color>
+</resources>

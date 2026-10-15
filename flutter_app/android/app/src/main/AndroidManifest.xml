@@ -1,0 +1,140 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 13+: runtime permission for notifications (asked with an explanation, once, after sign-in) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Incoming call over the lock screen + a call that keeps running when the app is minimized -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.TURN_SCREEN_ON"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+    <!-- Lets the user open this app's battery-optimization screen so FCM can wake it after it is swiped away. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <!-- Audio calls (flutter_webrtc) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+    <!-- Optional fingerprint / face unlock for the app lock -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <!-- Incoming ringing screen and the floating window during a call over other apps. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+
+    <application
+        android:label="Dahimail"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_dahimail_launcher"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <service android:name=".IncomingCallService" android:exported="false" android:foregroundServiceType="shortService"/>
+
+        <!-- System incoming-call UI is available before Flutter starts. -->
+        <activity android:name=".IncomingCallActivity" android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:showWhenLocked="true" android:turnScreenOn="true"
+            android:excludeFromRecents="true" android:noHistory="false"
+            android:taskAffinity="com.dahify.dahimail.incoming"
+            android:launchMode="singleTop"/>
+        <receiver android:name=".IncomingCallDeclineReceiver" android:exported="false"/>
+        <receiver android:name=".FriendChatWidget" android:exported="false"
+            android:label="@string/friend_widget_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/friend_chat_widget_info"/>
+        </receiver>
+
+        <!-- Returns the user to the app after Gmail / Outlook / Slack / Calendar / Salesforce sign-in
+             (the server ends the flow with a redirect to dahimail://oauth?status=ok) -->
+        <activity
+            android:name="com.linusu.flutter_web_auth_2.CallbackActivity"
+            android:exported="true">
+            <intent-filter android:label="flutter_web_auth_2">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="dahimail" />
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground service used by flutter_local_notifications while a call / meeting runs (mic + camera types) -->
+        <service
+            android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera"
+            tools:replace="android:foregroundServiceType"/>
+
+        <!-- Required for the fallback incoming-call notification's Accept / Decline buttons. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false"/>
+
+        <!-- Floating call window (audio calls) shown over other apps -->
+        <service
+            android:name=".CallOverlayService"
+            android:exported="false"/>
+
+        <!-- FCM's service handles data-only calls even with no Flutter engine or Activity.
+             The receiver only retains legacy notification tap bookkeeping. -->
+        <service android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService" tools:node="remove"/>
+        <service android:name=".NativeMessagingService" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter>
+        </service>
+        <receiver android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingReceiver" tools:node="remove"/>
+        <receiver android:name=".NativePushReceiver" android:exported="true"
+            android:permission="com.google.android.c2dm.permission.SEND">
+            <intent-filter><action android:name="com.google.android.c2dm.intent.RECEIVE"/></intent-filter>
+        </receiver>
+
+        <!-- Push notifications (Firebase): channel + icon used when the app is closed -->
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="dm_push"/>
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_notify"/>
+
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+</manifest>

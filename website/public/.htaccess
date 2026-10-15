@@ -1,0 +1,50 @@
+# ----------------------------------------------------------------------------
+# PHP runtime overrides — needed so the Admin -> System Update uploader can
+# accept 100-200 MB update ZIPs. Defaults on shared hosting are usually 2-8 MB.
+#
+# The directives below are wrapped in <IfModule> guards so they ONLY apply
+# when mod_php is actually loaded. On PHP-FPM / CGI hosts (which don't load
+# mod_php), these blocks are skipped silently and the matching `.user.ini`
+# in this folder takes over instead. This avoids the "500 Internal Server
+# Error" you'd otherwise get on PHP-FPM hosts.
+# ----------------------------------------------------------------------------
+<IfModule mod_php8.c>
+    php_value upload_max_filesize 512M
+    php_value post_max_size 512M
+    php_value max_execution_time 600
+    php_value max_input_time 600
+    php_value memory_limit 512M
+</IfModule>
+<IfModule mod_php7.c>
+    php_value upload_max_filesize 512M
+    php_value post_max_size 512M
+    php_value max_execution_time 600
+    php_value max_input_time 600
+    php_value memory_limit 512M
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Handle X-XSRF-Token Header
+    RewriteCond %{HTTP:x-xsrf-token} .
+    RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
+
+    # Redirect Trailing Slashes If Not A Folder...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    # Send Requests To Front Controller...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>

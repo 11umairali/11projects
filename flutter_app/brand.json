@@ -1,0 +1,17 @@
+{
+  "_help": "Edit the values, then run:  python tools/rebrand.py",
+  "appName": "Dahimail",
+  "tagline": "Email & customer conversations, in one place.",
+  "baseUrl": "https://dahimail.com",
+  "mailDomain": "dahimail.com",
+  "applicationId": "com.dahify.dahimail",
+  "urlScheme": "dahimail",
+  "primaryColor": "#2563EB",
+  "logo": "assets/brand/logo_source.png",
+  "logoStyle": "tile",
+  "iconBackground": "#2563EB",
+  "splashBackground": "#FFFFFF",
+  "splashTextColor": "#172554",
+  "fontBold": "assets/fonts/Inter-Variable.ttf",
+  "fontRegular": "assets/fonts/Inter-Variable.ttf"
+}

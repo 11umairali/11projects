@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /inbox
+Disallow: /contacts
+Disallow: /settings
+Disallow: /admin
+Disallow: /api
+
+Sitemap: https://mailtrixy.com/sitemap.xml

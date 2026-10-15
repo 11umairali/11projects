@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:layoutDirection="ltr" android:padding="12dp"
+    android:background="@color/incoming_background">
+    <LinearLayout android:id="@+id/incoming_identity" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="top" android:clickable="true" android:focusable="true"
+        android:contentDescription="Open incoming call">
+        <ImageView android:layout_width="36dp" android:layout_height="36dp"
+            android:layout_marginEnd="10dp" android:src="@mipmap/ic_launcher" android:contentDescription="Dahimail" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:orientation="vertical" android:paddingEnd="8dp">
+            <TextView android:id="@+id/incoming_name" style="@style/IncomingCallText" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:gravity="start" android:textColor="#FFFFFF" android:textStyle="bold"
+                android:textSize="16sp" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="4dp">
+                <ImageView android:id="@+id/incoming_type_icon" android:layout_width="16dp" android:layout_height="16dp"
+                    android:layout_marginEnd="4dp" android:importantForAccessibility="no" />
+                <TextView android:id="@+id/incoming_status" style="@style/IncomingCallText" android:layout_width="0dp"
+                    android:layout_weight="1" android:layout_height="wrap_content" android:gravity="start" android:textSize="12sp" android:maxLines="2" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="end">
+            <TextView android:id="@+id/incoming_time" style="@style/IncomingCallText" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textSize="10sp" android:maxLines="1" />
+            <FrameLayout android:layout_width="36dp" android:layout_height="36dp" android:layout_marginTop="3dp"
+                android:background="@drawable/incoming_avatar_background" android:clipToOutline="true">
+                <TextView android:id="@+id/incoming_initials" style="@style/IncomingCallText"
+                    android:layout_width="match_parent" android:layout_height="match_parent" android:textSize="16sp" />
+                <ImageView android:id="@+id/incoming_avatar" android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:scaleType="centerCrop" android:importantForAccessibility="no" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="end" android:layout_marginTop="8dp">
+        <ImageButton android:id="@+id/incoming_decline" android:layout_width="48dp" android:layout_height="48dp"
+            android:background="@drawable/incoming_decline_background" android:padding="12dp"
+            android:src="@drawable/ic_incoming_decline" android:contentDescription="Decline" />
+        <ImageButton android:id="@+id/incoming_accept" android:layout_width="48dp" android:layout_height="48dp"
+            android:layout_marginStart="24dp" android:background="@drawable/incoming_accept_background" android:padding="12dp"
+            android:src="@drawable/ic_incoming_accept" android:contentDescription="Accept" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="friend_widget_name">Friend chat</string>
+    <string name="friend_widget_description">Open a friend’s conversation from your home screen.</string>
+    <string name="friend_widget_choose">Choose a friend</string>
+    <string name="friend_widget_setup">Tap to set up</string>
+    <string name="friend_widget_open">Open chat</string>
+    <string name="friend_widget_chat_with">Open chat with %1$s</string>
+</resources>

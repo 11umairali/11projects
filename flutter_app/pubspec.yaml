@@ -1,0 +1,81 @@
+name: dahimail
+description: Dahimail mobile app.
+publish_to: 'none'
+version: 1.0.17+6
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_callkit_incoming: ^3.1.6
+  firebase_core: ^3.12.1
+  firebase_messaging: ^15.2.4     # push notifications while the app is closed
+  http: ^1.2.2
+  provider: ^6.1.2
+  flutter_secure_storage: ^9.2.2
+  google_fonts: ^6.2.1
+  url_launcher: ^6.3.0
+  intl: ^0.19.0
+  file_picker: ^8.1.2
+  path_provider: ^2.1.4
+  open_filex: ^4.5.0
+  flutter_widget_from_html: ^0.15.3
+  image_picker: ^1.1.2
+  video_player: ^2.9.2          # plays videos inside the chat
+  file_saver: ^0.2.14           # "Download" = save a copy where you choose
+  webview_flutter: ^4.10.0        # in-app payment page
+  flutter_web_auth_2: ^4.1.0      # secure in-app sheet for Gmail / Outlook / Slack / Calendar / Salesforce connect
+  sqflite: ^2.4.2
+  shared_preferences: ^2.3.2      # per-device settings (theme, notification options)
+  crypto: ^3.0.3                  # PIN hashing for the app lock
+  # Version ranges are pinned to the APIs this code was written against.
+  local_auth: '>=2.3.0 <3.0.0'                      # fingerprint / face unlock
+  flutter_local_notifications: '>=18.0.0 <20.0.0'   # system notifications
+  permission_handler: '>=11.3.1 <13.0.0'            # permission status + open phone settings
+  package_info_plus: '>=8.0.0 <10.0.0'              # version number on the About screen
+  flutter_contacts: ^1.1.9+2                         # find friends from the phone's contacts (with permission)
+  record: '>=5.1.0 <7.0.0'                           # record voice messages
+  flutter_webrtc: '>=0.11.7 <0.13.0'               # audio calls between friends (WebRTC)
+  just_audio: '>=0.9.40 <0.11.0'                    # notification sound preview (already used by the HTML renderer)
+  workmanager: ^0.10.10
+
+dev_dependencies:
+  shared_preferences_platform_interface: ^2.4.2
+  sqflite_common_ffi: ^2.3.6
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/
+    - assets/brand/
+    - assets/sounds/
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Variable.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Variable.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-Variable.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Variable.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-Variable.ttf
+          weight: 800
+
+
+flutter_launcher_icons:
+  android: ic_dahimail_launcher
+  ios: true
+  image_path: assets/icon/icon.png
+  adaptive_icon_background: "#2563EB"
+  adaptive_icon_foreground: assets/icon/icon_fg.png
+  adaptive_icon_monochrome: assets/icon/icon_mono.png   # Android 13+ themed icons
+  remove_alpha_ios: true

@@ -1,0 +1,277 @@
+/* ================================================================
+   MailTrixy LANDING PAGE — Custom Styles
+   Only keyframes, animation states, parallax CSS, and landing tokens.
+   All other styling uses TailwindCSS utility classes.
+   ================================================================ */
+
+@import 'tailwindcss';
+
+@source '../views/landing/**/*.blade.php';
+
+/* ── Landing Page Design Tokens ── */
+@theme {
+    --color-lp-brand: #2563EB;
+    --color-lp-brand-hover: #1D4ED8;
+    --color-lp-brand-light: #F0F2F5;
+    --color-lp-accent: #10B981;
+    --color-lp-accent-hover: #059669;
+    --color-dark-bg: #0B0F1A;
+    --color-dark-surface: #131927;
+    --color-dark-elevated: #1C2333;
+
+    --font-inter: 'Inter', system-ui, -apple-system, sans-serif;
+
+    /* Animations */
+    --animate-float: float 6s ease-in-out infinite;
+    --animate-float-delayed: float 6s ease-in-out 2s infinite;
+    --animate-float-slow: float 8s ease-in-out 1s infinite;
+    --animate-pulse-glow: pulseGlow 3s ease-in-out infinite;
+    --animate-marquee: marquee 30s linear infinite;
+    --animate-marquee-reverse: marqueeReverse 35s linear infinite;
+    --animate-slide-up: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    --animate-scale-in: scaleIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    --animate-fade-in-lp: fadeInLp 1s ease forwards;
+    --animate-gradient-shift: gradientShift 5s ease-in-out infinite;
+}
+
+/* ── Frontend dark-only token overrides (force dark + AA/AAA contrast) ── */
+html.dark, html[data-theme="dark"] {
+    --color-surface: #10151C;
+    --color-surface-2: #181F29;
+    --color-ink: #f5f7fa;
+    --color-muted: #cbd5e1;
+    --color-border: #303B49;
+    --color-success: #6ee7b7;
+    --color-warning: #fcd34d;
+    --color-danger: #fca5a5;
+}
+
+/* ── Keyframes ── */
+@keyframes float {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50% { transform: translateY(-20px) rotate(1deg); }
+}
+
+@keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 20px rgba(108,60,231,0.3); }
+    50% { box-shadow: 0 0 40px rgba(108,60,231,0.6), 0 0 80px rgba(108,60,231,0.2); }
+}
+
+@keyframes marquee {
+    0% { transform: translateX(0%); }
+    100% { transform: translateX(-50%); }
+}
+
+@keyframes marqueeReverse {
+    0% { transform: translateX(-50%); }
+    100% { transform: translateX(0%); }
+}
+
+@keyframes slideUp {
+    0% { opacity: 0; transform: translateY(60px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+    0% { opacity: 0; transform: scale(0.9); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes fadeInLp {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+@keyframes gradientShift {
+    0%, 100% { background-position: 0% center; }
+    50% { background-position: 100% center; }
+}
+
+@keyframes typewriter {
+    from { width: 0; }
+    to { width: 100%; }
+}
+
+/* ── Scroll-Triggered Animation States ── */
+[data-animate] {
+    opacity: 0;
+    transform: translateY(40px);
+    transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-animate].is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+[data-animate="left"] {
+    opacity: 0;
+    transform: translateX(-60px);
+}
+[data-animate="left"].is-visible {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+[data-animate="right"] {
+    opacity: 0;
+    transform: translateX(60px);
+}
+[data-animate="right"].is-visible {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+[data-animate="scale"] {
+    opacity: 0;
+    transform: scale(0.9);
+}
+[data-animate="scale"].is-visible {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* ── Stagger Delays for Grid Children ── */
+[data-stagger].is-visible > :nth-child(1) { transition-delay: 0ms; }
+[data-stagger].is-visible > :nth-child(2) { transition-delay: 80ms; }
+[data-stagger].is-visible > :nth-child(3) { transition-delay: 80ms; }
+[data-stagger].is-visible > :nth-child(4) { transition-delay: 160ms; }
+[data-stagger].is-visible > :nth-child(5) { transition-delay: 200ms; }
+[data-stagger].is-visible > :nth-child(6) { transition-delay: 240ms; }
+[data-stagger].is-visible > :nth-child(7) { transition-delay: 280ms; }
+[data-stagger].is-visible > :nth-child(8) { transition-delay: 320ms; }
+[data-stagger].is-visible > :nth-child(9) { transition-delay: 360ms; }
+[data-stagger].is-visible > :nth-child(10) { transition-delay: 400ms; }
+[data-stagger].is-visible > :nth-child(11) { transition-delay: 440ms; }
+[data-stagger].is-visible > :nth-child(12) { transition-delay: 480ms; }
+[data-stagger].is-visible > :nth-child(13) { transition-delay: 520ms; }
+[data-stagger].is-visible > :nth-child(14) { transition-delay: 560ms; }
+[data-stagger].is-visible > :nth-child(15) { transition-delay: 600ms; }
+[data-stagger].is-visible > :nth-child(16) { transition-delay: 640ms; }
+[data-stagger].is-visible > :nth-child(17) { transition-delay: 680ms; }
+[data-stagger].is-visible > :nth-child(18) { transition-delay: 720ms; }
+[data-stagger].is-visible > :nth-child(19) { transition-delay: 760ms; }
+[data-stagger].is-visible > :nth-child(20) { transition-delay: 800ms; }
+
+[data-stagger] > * {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-stagger].is-visible > * {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* ── Gradient Text ── */
+.gradient-text {
+    color: var(--color-ink);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+}
+
+/* ── Glassmorphism ── */
+.glass {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(15,23,42,0.08);
+}
+html.dark .glass, html[data-theme="dark"] .glass {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.glass-card {
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(15,23,42,0.08);
+}
+html.dark .glass-card, html[data-theme="dark"] .glass-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Landing Page Base ── */
+.landing-body {
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+}
+
+/* ── Dot Grid Background ── */
+.dot-grid {
+    background-image: radial-gradient(rgba(15,23,42,0.08) 1px, transparent 1px);
+    background-size: 40px 40px;
+}
+html.dark .dot-grid, html[data-theme="dark"] .dot-grid {
+    background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+}
+
+/* ── Glow Effects ── */
+.glow-purple {
+    box-shadow: 0 0 60px rgba(108,60,231,0.15), 0 0 120px rgba(108,60,231,0.05);
+}
+
+.glow-green {
+    box-shadow: 0 0 60px rgba(16,185,129,0.15), 0 0 120px rgba(16,185,129,0.05);
+}
+
+/* ── Glass Navigation ── */
+.glass-nav {
+    background: color-mix(in srgb, var(--color-surface-2) 92%, transparent);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+html.dark .glass-nav, html[data-theme="dark"] .glass-nav {
+    background: rgba(20,23,32,0.95);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Shadow Soft ── */
+.shadow-soft {
+    box-shadow: 0 4px 24px rgba(15,23,42,0.08);
+}
+html.dark .shadow-soft, html[data-theme="dark"] .shadow-soft {
+    box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+}
+
+/* ── Mockup Glow ── */
+.mockup-glow {
+    box-shadow: 0 25px 80px -12px rgba(99,102,241,0.15);
+}
+
+/* ── Pricing Popular ── */
+.pricing-popular {
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.3), 0 8px 40px rgba(99,102,241,0.1);
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+    [data-animate],
+    [data-stagger] > * {
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+    }
+
+    .gradient-text {
+        animation: none;
+    }
+
+    [data-parallax] {
+        transform: none !important;
+    }
+}
+
+/* Public pages use the same calm foundations as the signed-in interface. */
+@theme { --color-surface: #F3F4F6; --color-surface-2: #FFFFFF; --color-ink: #18212F; --color-muted: #687386; --color-border: #E2E5E9; }
+.bg-lp-brand { color:var(--color-on-brand,#fff); }
+.bg-lp-brand:hover { color:var(--color-on-brand-hover,#fff); }

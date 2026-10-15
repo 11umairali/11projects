@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="CallLaunchTheme" parent="Theme.SplashScreen">
+        <item name="android:windowBackground">#111118</item>
+        <item name="android:statusBarColor">#111118</item>
+        <item name="android:navigationBarColor">#111118</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="windowSplashScreenBackground">#111118</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/call_connecting</item>
+        <item name="postSplashScreenTheme">@style/CallTheme</item>
+    </style>
+    <style name="CallTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">#111118</item>
+    </style>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match IncomingCallPresentation in lib/core/incoming_call_view.dart. -->
+    <color name="incoming_background">#111118</color>
+    <color name="incoming_avatar">#252532</color>
+    <color name="incoming_secondary">#B3FFFFFF</color>
+    <color name="incoming_accept">#16A34A</color>
+    <color name="incoming_decline">#DC2626</color>
+    <style name="IncomingCallText">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">@color/incoming_secondary</item>
+    </style>
+</resources>

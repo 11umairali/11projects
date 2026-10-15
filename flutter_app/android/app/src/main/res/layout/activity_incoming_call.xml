@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/incoming_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:fillViewport="true" android:background="@color/incoming_background" android:clipToPadding="false">
+    <LinearLayout android:id="@+id/incoming_content" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:gravity="center_horizontal" android:padding="24dp">
+        <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="2" />
+        <FrameLayout android:id="@+id/incoming_avatar_frame" android:layout_width="112dp" android:layout_height="112dp"
+            android:background="@drawable/incoming_avatar_background" android:clipToOutline="true">
+            <TextView android:id="@+id/incoming_initials" style="@style/IncomingCallText"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:textColor="#FFFFFF" android:textSize="40sp" android:textStyle="bold" />
+            <ImageView android:id="@+id/incoming_avatar" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:scaleType="centerCrop" android:importantForAccessibility="no" />
+        </FrameLayout>
+        <TextView android:id="@+id/incoming_name" style="@style/IncomingCallText"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+            android:textColor="#FFFFFF" android:textSize="26sp" android:textStyle="bold" />
+        <TextView android:id="@+id/incoming_status" style="@style/IncomingCallText"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textSize="16sp" />
+        <Space android:layout_width="1dp" android:layout_height="32dp" />
+        <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="3" />
+        <LinearLayout android:id="@+id/incoming_actions" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layoutDirection="ltr" android:gravity="center_vertical">
+            <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center_horizontal">
+                <ImageButton android:id="@+id/incoming_decline" android:layout_width="70dp" android:layout_height="70dp"
+                    android:background="@drawable/incoming_decline_background" android:padding="20dp" android:scaleType="fitCenter"
+                    android:src="@drawable/ic_incoming_decline" android:contentDescription="Decline" />
+                <TextView style="@style/IncomingCallText" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:textSize="14sp" android:text="Decline" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center_horizontal">
+                <ImageButton android:id="@+id/incoming_accept" android:layout_width="70dp" android:layout_height="70dp"
+                    android:background="@drawable/incoming_accept_background" android:padding="20dp" android:scaleType="fitCenter"
+                    android:src="@drawable/ic_incoming_accept" android:contentDescription="Accept" />
+                <TextView style="@style/IncomingCallText" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:textSize="14sp" android:text="Accept" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        </LinearLayout>
+        <Space android:layout_width="1dp" android:layout_height="16dp" />
+    </LinearLayout>
+</ScrollView>
